@@ -1,0 +1,83 @@
+import asyncio
+import httpx
+import json
+import redis.asyncio as redis
+from config import USGS_API_URL, REDIS_URL, STREAM_KEY, FETCH_INTERVAL
+
+async def fetch_earthquakes():
+    """Fetch earthquake data from USGS API."""
+    async with httpx.AsyncClient() as client:
+        try:
+            response = await client.get(USGS_API_URL)
+            response.raise_for_status()
+            return response.json()
+        except httpx.RequestError as e:
+            print(f"Error fetching data: {e}")
+            return None
+        except httpx.HTTPStatusError as e:
+            print(f"HTTP Error: {e}")
+            return None
+
+async def push_to_redis(redis_client, data):
+    """Push earthquake events to Redis Stream."""
+    if not data or "features" not in data:
+        return
+
+    count = 0
+    for feature in data["features"]:
+        # Extract relevant fields
+        event_id = feature["id"]
+        properties = feature["properties"]
+        geometry = feature["geometry"]
+
+        event_data = {
+            "id": str(event_id),
+            "magnitude": str(properties.get("mag") or 0.0),
+            "place": str(properties.get("place") or "Unknown"),
+            "time": str(properties.get("time") or ""),
+            "url": str(properties.get("url") or ""),
+            "longitude": str(geometry["coordinates"][0]),
+            "latitude": str(geometry["coordinates"][1]),
+            "depth": str(geometry["coordinates"][2]),
+            "raw_json": json.dumps(feature) # Store full raw data just in case
+        }
+
+        # Check if event needs processing? 
+        # For now, we push everything. Consumers can handle deduplication.
+        # Ideally, we could check if ID exists in a set, but let's keep it simple first.
+        
+        try:
+            # XADD: Appends to stream. ID='*' means auto-generate ID.
+            await redis_client.xadd(STREAM_KEY, event_data)
+            count += 1
+        except Exception as e:
+            print(f"Error pushing to Redis: {e}")
+
+    print(f"Pushed {count} events to Redis Stream '{STREAM_KEY}'.")
+
+async def main():
+    print(f"Starting Earthquake Producer...")
+    print(f"Connecting to Redis at {REDIS_URL}")
+    
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    
+    try:
+        await redis_client.ping()
+        print("Connected to Redis successfully.")
+    except Exception as e:
+        print(f"Failed to connect to Redis: {e}")
+        return
+
+    while True:
+        print("Fetching data from USGS...")
+        data = await fetch_earthquakes()
+        
+        if data:
+            print(f"Fetched {len(data.get('features', []))} events.")
+            await push_to_redis(redis_client, data)
+        
+        print(f"Sleeping for {FETCH_INTERVAL} seconds...")
+        await asyncio.sleep(FETCH_INTERVAL)
+
+if __name__ == "__main__":
+    asyncio.run(main())
