@@ -1,0 +1,71 @@
+
+
+services:
+  # 1. MongoDB (Primary Storage)
+  mongo:
+    image: mongo:latest
+    container_name: eq_mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    restart: always
+
+  # 2. Redis (Real-time Cache / Message Broker)
+  redis:
+    image: redis:alpine
+    container_name: eq_redis
+    ports:
+      - "6379:6379"
+    restart: always
+
+  # 3. Neo4j (Graph Database)
+  neo4j:
+    image: neo4j:5
+    container_name: eq_neo4j
+    ports:
+      - "7474:7474" # HTTP Interface
+      - "7687:7687" # Bolt Protocol
+    environment:
+      - NEO4J_AUTH=neo4j/test123
+    volumes:
+      - neo4j_data:/data
+    restart: always
+
+  # 4. Backend API
+  backend:
+    build: ./backend
+    container_name: eq_backend
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mongo
+      - redis
+      - neo4j
+    env_file:
+      - .env
+    restart: on-failure
+
+  # 5. Background Worker
+  worker:
+    build: ./backend
+    container_name: eq_worker
+    command: python worker.py
+    depends_on:
+      - redis
+      - mongo
+    env_file:
+      - .env
+    restart: on-failure
+
+  # 6. Frontend (Vite/React/Vue)
+  frontend:
+    build: ./frontend
+    container_name: eq_frontend
+    ports:
+      - "5173:5173"
+    restart: always
+
+volumes:
+  mongo_data:
+  neo4j_data:
