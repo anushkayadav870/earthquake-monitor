@@ -1,7 +1,5 @@
 fastapi
 uvicorn
-pymongo
-redis
-neo4j
 httpx
-asyncio
+redis
+motor
