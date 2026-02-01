@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import json
 import redis.asyncio as redis
-from config import USGS_API_URL, REDIS_URL, STREAM_KEY, FETCH_INTERVAL
+from config import USGS_API_URL, REDIS_URL, STREAM_KEY, LIVE_CHANNEL, FETCH_INTERVAL
 
 async def fetch_earthquakes():
     """Fetch earthquake data from USGS API."""
@@ -49,6 +49,11 @@ async def push_to_redis(redis_client, data):
         try:
             # XADD: Appends to stream. ID='*' means auto-generate ID.
             await redis_client.xadd(STREAM_KEY, event_data)
+            
+            # PUBLISH: Broadcast to real-time subscribers
+            # We publish the raw JSON so the websocket can just forward it
+            await redis_client.publish(LIVE_CHANNEL, event_data["raw_json"])
+            
             count += 1
         except Exception as e:
             print(f"Error pushing to Redis: {e}")
