@@ -4,3 +4,4 @@ httpx
 redis
 motor
 websockets
+neo4j

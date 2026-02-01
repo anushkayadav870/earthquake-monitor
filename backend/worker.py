@@ -3,6 +3,7 @@ import redis.asyncio as redis
 import json
 from config import REDIS_URL, STREAM_KEY
 from db_mongo import mongo_handler
+from db_neo4j import neo4j_handler
 from producer import main as run_producer_loop
 
 CONSUMER_GROUP = "analytics_group"
@@ -46,6 +47,13 @@ async def run_consumer_loop():
                         # Pass data directly to Mongo handler
                         # ensure 'id' field is present (it is, from producer)
                         await mongo_handler.insert_earthquake(data)
+                        
+                        # Ingest into Neo4j
+                        try:
+                            neo4j_handler.insert_earthquake(data)
+                            print(f"[Neo4j] Inserted/Updated earthquake: {data['id']}")
+                        except Exception as e:
+                            print(f"[Neo4j] Error inserting: {e}")
                         
                         # Acknowledge
                         await redis_client.xack(STREAM_KEY, CONSUMER_GROUP, message_id)
