@@ -6,6 +6,7 @@ USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_ho
 # Redis Configuration
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_KEY = "earthquake_stream"
+LIVE_CHANNEL = "live_earthquakes"
 
 # MongoDB Configuration
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
