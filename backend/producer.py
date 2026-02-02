@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import json
 import redis.asyncio as redis
-from config import USGS_API_URL, REDIS_URL, STREAM_KEY, LIVE_CHANNEL, FETCH_INTERVAL
+from config import USGS_API_URL, REDIS_URL, STREAM_KEY, LIVE_CHANNEL, FETCH_INTERVAL, ALERT_THRESHOLD, ALERT_CHANNEL
 
 async def fetch_earthquakes():
     """Fetch earthquake data from USGS API."""
@@ -47,6 +47,29 @@ async def push_to_redis(redis_client, data):
         # Ideally, we could check if ID exists in a set, but let's keep it simple first.
         
         try:
+            # 1. DEDUPLICATION
+            # Set key to expire in 24 hours (86400 seconds)
+            # nx=True means "Only set if Not Exists"
+            # Returns True if new, None if exists
+            dedup_key = f"processed:{event_id}"
+            is_new = await redis_client.set(dedup_key, "1", nx=True, ex=86400)
+            
+            if not is_new:
+                # print(f"Skipping duplicate event: {event_id}")
+                continue
+
+            # 2. CHECK FOR ALERTS
+            magnitude = float(properties.get("mag") or 0.0)
+            if magnitude >= ALERT_THRESHOLD:
+                event_data["is_alert"] = "true" # Store as string for Redis Stream/Dict
+                alert_payload = {
+                    "event": event_data,
+                    "message": f"ALERT: Magnitude {magnitude} earthquake detected near {event_data['place']}"
+                }
+                # Publish to separate Alert Channel
+                await redis_client.publish(ALERT_CHANNEL, json.dumps(alert_payload))
+                print(f"*** TRIGGERED ALERT FOR EVENT {event_id} (Mag {magnitude}) ***")
+
             # XADD: Appends to stream. ID='*' means auto-generate ID.
             await redis_client.xadd(STREAM_KEY, event_data)
             

@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import redis.asyncio as redis
 import os
-from config import REDIS_URL, LIVE_CHANNEL
+from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 
 # Redis Subscriber Background Task
@@ -14,6 +14,7 @@ async def redis_connector():
     redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     pubsub = redis_client.pubsub()
     await pubsub.subscribe(LIVE_CHANNEL)
+    await pubsub.subscribe(ALERT_CHANNEL)
     
     try:
         async for message in pubsub.listen():
