@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 import asyncio
 import redis.asyncio as redis
 import os
+import json
 from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 from db_mongo import mongo_handler
@@ -29,7 +30,8 @@ async def redis_connector():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Start the Redis listener
+    # Startup: Initialize Mongo and start the Redis listener
+    await mongo_handler.initialize()
     task = asyncio.create_task(redis_connector())
     yield
     # Shutdown (task cancellation can be added here if needed)
@@ -54,6 +56,101 @@ async def get_quakes(
     """
     quakes = await mongo_handler.get_earthquakes(mag_min, mag_max, start_time, end_time, limit)
     return quakes
+
+@app.get("/analytics/magnitude-distribution")
+async def get_mag_dist():
+    """
+    Get earthquake counts grouped by magnitude ranges.
+    Caches results for 10 minutes.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = "analytics:mag_dist"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    dist = await mongo_handler.get_magnitude_distribution()
+    await redis_client.set(cache_key, json.dumps(dist), ex=600)
+    await redis_client.aclose()
+    return dist
+
+@app.get("/analytics/magnitude-trends")
+async def get_mag_trends():
+    """
+    Get daily earthquake counts to show trends.
+    Caches results for 10 minutes.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = "analytics:mag_trends"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    trends = await mongo_handler.get_magnitude_trends()
+    await redis_client.set(cache_key, json.dumps(trends), ex=600)
+    await redis_client.aclose()
+    return trends
+
+@app.get("/analytics/depth-vs-magnitude")
+async def get_depth_mag():
+    """
+    Get depth vs magnitude data for scatter plots.
+    Caches results for 1 hour.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = "analytics:depth_mag"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    data = await mongo_handler.get_depth_vs_magnitude()
+    await redis_client.set(cache_key, json.dumps(data), ex=3600)
+    await redis_client.aclose()
+    return data
+
+@app.get("/analytics/risk-scores")
+async def get_risk_scores():
+    """
+    Get 0-100 risk scores for major regions.
+    Caches results for 24 hours.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = "analytics:risk_scores"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    scores = await mongo_handler.get_regional_risk_scores()
+    await redis_client.set(cache_key, json.dumps(scores), ex=86400) # 24h
+    await redis_client.aclose()
+    return scores
+
+@app.get("/analytics/unusual-activity")
+async def get_unusual_activity():
+    """
+    Identify regions with significantly higher frequency than historical norms.
+    Caches results for 1 hour.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = "analytics:unusual_activity"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    anomalies = await mongo_handler.get_unusual_activity_detection()
+    await redis_client.set(cache_key, json.dumps(anomalies), ex=3600) # 1h
+    await redis_client.aclose()
+    return anomalies
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

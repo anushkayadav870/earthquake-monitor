@@ -70,7 +70,7 @@ class Neo4jHandler:
 
                 MERGE (e:Earthquake {id: $id})
                 SET e.mag = toFloat($mag),
-                    e.time = $time,
+                    e.time = toInteger($time),
                     e.readable_time = $readable_time,
                     e.place = $place,
                     e.exact_address = $exact_address,
@@ -105,6 +105,7 @@ class Neo4jHandler:
             )
             
             self._link_aftershocks(session, data)
+            self._detect_cascades(session, data)
 
     def _extract_location_details(self, place):
         if "," in place:
@@ -122,22 +123,63 @@ class Neo4jHandler:
         return region, city
 
     def _link_aftershocks(self, session, data):
+        """
+        Connects this earthquake to a 'Main Shock' in the graph if it meets criteria:
+        - Within 50km
+        - Within 7 days
+        - Main Shock magnitude >= 5.0
+        """
         query = """
         MATCH (new:Earthquake {id: $id})
-        MATCH (old:Earthquake)
-        WHERE old.id <> new.id
-        AND new.location IS NOT NULL AND old.location IS NOT NULL
+        MATCH (main:Earthquake)
+        WHERE main.id <> new.id
+        AND main.mag >= 5.0
+        AND new.location IS NOT NULL AND main.location IS NOT NULL
         
-        WITH new, old, 
-             point.distance(new.location, old.location) / 1000 AS dist_km
+        // Convert to integers for subtraction in case already stored as strings
+        WITH new, main, 
+             point.distance(new.location, main.location) / 1000 AS dist_km,
+             (toInteger(new.time) - toInteger(main.time)) / (1000 * 60 * 60 * 24.0) AS days_diff
              
-        WHERE dist_km < 100
-        MERGE (new)-[r:POSSIBLE_AFTERSHOCK_OF]->(old)
-        SET r.distance_km = dist_km
+        WHERE dist_km < 50 
+        AND days_diff > 0 AND days_diff <= 7
+        
+        MERGE (new)-[r:PART_OF_SEQUENCE]->(main)
+        SET r.type = "Aftershock",
+            r.distance_km = dist_km,
+            r.time_diff_days = days_diff
         """
         try:
             session.run(query, id=data["id"])
         except Exception as e:
             print(f"Error linking aftershocks: {e}")
+
+    def _detect_cascades(self, session, data):
+        """
+        Detects potential triggered events across different fault zones.
+        Criteria: different faults, < 200km distance, < 48 hours time gap.
+        """
+        query = """
+        MATCH (new:Earthquake {id: $id})-[:ON_FAULT]->(fz1:FaultZone)
+        MATCH (other:Earthquake)-[:ON_FAULT]->(fz2:FaultZone)
+        WHERE fz1 <> fz2 
+        AND other.id <> new.id
+        AND other.mag >= 4.0
+        
+        WITH new, other, fz1, fz2,
+             point.distance(new.location, other.location) / 1000 AS dist_km,
+             abs(toInteger(new.time) - toInteger(other.time)) / (1000 * 60 * 60.0) AS hours_diff
+             
+        WHERE dist_km < 200 AND hours_diff < 48
+        MERGE (other)-[r:POSSIBLE_TRIGGERED_EVENT]->(new)
+        SET r.distance_km = dist_km,
+            r.hours_diff = hours_diff,
+            r.from_fault = fz2.name,
+            r.to_fault = fz1.name
+        """
+        try:
+            session.run(query, id=data["id"])
+        except Exception as e:
+            print(f"Error detecting cascades: {e}")
 
 neo4j_handler = Neo4jHandler()

@@ -110,6 +110,9 @@ async def run_consumer_loop():
             await asyncio.sleep(5)
 
 async def main():
+    # Initialize Databases
+    await mongo_handler.initialize()
+    
     # Run both Producer and Consumer concurrently
     await asyncio.gather(
         run_producer_loop(),
