@@ -44,6 +44,8 @@ services:
       - neo4j
     env_file:
       - .env
+    volumes:
+      - ./backend:/app
     restart: on-failure
 
   # 5. Background Worker
@@ -56,6 +58,8 @@ services:
       - mongo
     env_file:
       - .env
+    volumes:
+      - ./backend:/app
     restart: on-failure
 
   # 6. Frontend (Vite/React/Vue)
