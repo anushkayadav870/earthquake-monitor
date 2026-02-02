@@ -5,6 +5,7 @@ import redis.asyncio as redis
 import os
 from config import REDIS_URL, LIVE_CHANNEL
 from socket_manager import manager
+from db_mongo import mongo_handler
 
 # Redis Subscriber Background Task
 async def redis_connector():
@@ -37,6 +38,21 @@ app = FastAPI(lifespan=lifespan)
 @app.get("/")
 def read_root():
     return {"message": "Hello from Earthquake Monitor Backend!"}
+
+@app.get("/earthquakes")
+async def get_quakes(
+    mag_min: float = None, 
+    mag_max: float = None, 
+    start_time: int = None, 
+    end_time: int = None, 
+    limit: int = 50
+):
+    """
+    Fetch filtered earthquakes.
+    Example: /earthquakes?mag_min=5.0&limit=10
+    """
+    quakes = await mongo_handler.get_earthquakes(mag_min, mag_max, start_time, end_time, limit)
+    return quakes
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
