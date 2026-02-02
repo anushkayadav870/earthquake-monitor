@@ -3,6 +3,9 @@ import redis.asyncio as redis
 import json
 from config import REDIS_URL, STREAM_KEY
 from db_mongo import mongo_handler
+from db_neo4j import neo4j_handler
+from geocoder import geocoder
+from utils import format_timestamp
 from producer import main as run_producer_loop
 
 CONSUMER_GROUP = "analytics_group"
@@ -43,9 +46,28 @@ async def run_consumer_loop():
                 for message_id, data in messages:
                     print(f"Processing event: {message_id}")
                     try:
+                        # Enrich with Exact Location
+                        lat = float(data.get("latitude", 0))
+                        lon = float(data.get("longitude", 0))
+                        exact_address = geocoder.get_exact_address(lat, lon)
+                        if exact_address:
+                            data["exact_address"] = exact_address
+
+                        # Enrich with Readable Time
+                        ts = data.get("time")
+                        if ts:
+                            data["readable_time"] = format_timestamp(ts)
+
                         # Pass data directly to Mongo handler
                         # ensure 'id' field is present (it is, from producer)
                         await mongo_handler.insert_earthquake(data)
+                        
+                        # Ingest into Neo4j
+                        try:
+                            neo4j_handler.insert_earthquake(data)
+                            print(f"[Neo4j] Inserted/Updated earthquake: {data['id']}")
+                        except Exception as e:
+                            print(f"[Neo4j] Error inserting: {e}")
                         
                         # Acknowledge
                         await redis_client.xack(STREAM_KEY, CONSUMER_GROUP, message_id)
