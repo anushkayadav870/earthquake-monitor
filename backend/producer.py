@@ -42,26 +42,18 @@ async def push_to_redis(redis_client, data):
             "raw_json": json.dumps(feature) # Store full raw data just in case
         }
 
-        # Check if event needs processing? 
-        # For now, we push everything. Consumers can handle deduplication.
-        # Ideally, we could check if ID exists in a set, but let's keep it simple first.
-        
         try:
             # 1. DEDUPLICATION
-            # Set key to expire in 24 hours (86400 seconds)
-            # nx=True means "Only set if Not Exists"
-            # Returns True if new, None if exists
             dedup_key = f"processed:{event_id}"
             is_new = await redis_client.set(dedup_key, "1", nx=True, ex=86400)
             
             if not is_new:
-                # print(f"Skipping duplicate event: {event_id}")
                 continue
-
+            
             # 2. CHECK FOR ALERTS
             magnitude = float(properties.get("mag") or 0.0)
             if magnitude >= ALERT_THRESHOLD:
-                event_data["is_alert"] = "true" # Store as string for Redis Stream/Dict
+                event_data["is_alert"] = "true" 
                 alert_payload = {
                     "event": event_data,
                     "message": f"ALERT: Magnitude {magnitude} earthquake detected near {event_data['place']}"
@@ -74,7 +66,6 @@ async def push_to_redis(redis_client, data):
             await redis_client.xadd(STREAM_KEY, event_data)
             
             # PUBLISH: Broadcast to real-time subscribers
-            # We publish the raw JSON so the websocket can just forward it
             await redis_client.publish(LIVE_CHANNEL, event_data["raw_json"])
             
             count += 1

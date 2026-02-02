@@ -21,5 +21,5 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "test1234")
 FETCH_INTERVAL = 30  # seconds
 
 # Alert Configuration
-ALERT_THRESHOLD = 5.0
+ALERT_THRESHOLD = 1.0
 ALERT_CHANNEL = "verified_alerts"
