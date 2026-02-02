@@ -43,6 +43,8 @@ app = FastAPI(lifespan=lifespan)
 def read_root():
     return {"message": "Hello from Earthquake Monitor Backend!"}
 
+# Force reload for analytics routes
+
 @app.get("/earthquakes")
 async def get_quakes(
     mag_min: float = None, 

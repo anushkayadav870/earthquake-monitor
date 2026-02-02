@@ -176,6 +176,7 @@ class Neo4jHandler:
             r.hours_diff = hours_diff,
             r.from_fault = fz2.name,
             r.to_fault = fz1.name
+        """
         try:
             with self.driver.session() as session:
                 session.run(query, id=data["id"])
