@@ -176,10 +176,37 @@ class Neo4jHandler:
             r.hours_diff = hours_diff,
             r.from_fault = fz2.name,
             r.to_fault = fz1.name
-        """
         try:
-            session.run(query, id=data["id"])
+            with self.driver.session() as session:
+                session.run(query, id=data["id"])
         except Exception as e:
             print(f"Error detecting cascades: {e}")
+
+    def get_earthquake_context(self, event_id):
+        """
+        Fetches related graph data: nearby cities, faults, affected zones.
+        """
+        query = """
+        MATCH (e:Earthquake {id: $id})
+        OPTIONAL MATCH (e)-[:OCCURRED_IN]->(r:Region)
+        OPTIONAL MATCH (e)-[:OCCURRED_NEAR]->(c:City)
+        OPTIONAL MATCH (e)-[:ON_FAULT]->(f:FaultZone)
+        OPTIONAL MATCH (e)-[:AFFECTED_ZONE]->(ac:City)
+        
+        RETURN {
+            region: r.name,
+            near_city: c.name,
+            fault_zone: f.name,
+            affected_cities: collect(ac.name)
+        } as context
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, id=event_id)
+                record = result.single()
+                return record["context"] if record else {}
+        except Exception as e:
+            print(f"Error fetching Neo4j context: {e}")
+            return {}
 
 neo4j_handler = Neo4jHandler()

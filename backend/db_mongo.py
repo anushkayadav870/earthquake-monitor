@@ -13,6 +13,13 @@ class MongoHandler:
         """Explicitly initialize indexes. Call this from an async context."""
         await self._ensure_indexes()
 
+    async def get_event(self, event_id: str):
+        """Fetch a single earthquake by ID."""
+        doc = await self.collection.find_one({"id": event_id})
+        if doc:
+            doc["_id"] = str(doc["_id"])
+        return doc
+
     async def _ensure_indexes(self):
         """Ensures that required indexes (including geospatial) are present."""
         await self.collection.create_index([("location", "2dsphere")])
@@ -53,7 +60,10 @@ class MongoHandler:
         except Exception as e:
             print(f"[Mongo] Error inserting earthquake {data.get('id')}: {e}")
 
-    async def get_earthquakes(self, mag_min=None, mag_max=None, start_time=None, end_time=None, limit=100):
+    async def get_earthquakes(self, mag_min=None, mag_max=None, start_time=None, end_time=None, 
+                              depth_min=None, depth_max=None, 
+                              north=None, south=None, east=None, west=None, 
+                              limit=100):
         """Fetch earthquakes with optional filters."""
         query = {}
         
@@ -73,6 +83,25 @@ class MongoHandler:
             if end_time is not None:
                 query["time"]["$lte"] = int(end_time)
 
+        # Depth Filter
+        if depth_min is not None or depth_max is not None:
+            query["depth"] = {}
+            if depth_min is not None:
+                query["depth"]["$gte"] = float(depth_min)
+            if depth_max is not None:
+                query["depth"]["$lte"] = float(depth_max)
+
+        # Bounding Box Filter (North/South = Lat, East/West = Lon)
+        if north is not None or south is not None:
+            query["latitude"] = {}
+            if north is not None: query["latitude"]["$lte"] = float(north)
+            if south is not None: query["latitude"]["$gte"] = float(south)
+            
+        if east is not None or west is not None:
+            query["longitude"] = {}
+            if east is not None: query["longitude"]["$lte"] = float(east)
+            if west is not None: query["longitude"]["$gte"] = float(west)
+
         cursor = self.collection.find(query).sort("time", -1).limit(limit)
         results = await cursor.to_list(length=limit)
         
@@ -81,6 +110,36 @@ class MongoHandler:
             r["_id"] = str(r["_id"])
         
         return results
+
+    async def get_heatmap_data(self, start_time: int, end_time: int):
+        """
+        Aggregates earthquake data into a grid for heatmaps.
+        Groups events by rounded latitude/longitude (approx 10km grid).
+        """
+        pipeline = [
+            {"$match": {"time": {"$gte": int(start_time), "$lte": int(end_time)}}},
+            {
+                "$project": {
+                    "lat": {"$round": ["$latitude", 1]},
+                    "lon": {"$round": ["$longitude", 1]}
+                }
+            },
+            {
+                "$group": {
+                    "_id": {"lat": "$lat", "lon": "$lon"},
+                    "intensity": {"$sum": 1}
+                }
+            },
+            {
+                "$project": {
+                    "_id": 0,
+                    "lat": "$_id.lat",
+                    "lon": "$_id.lon",
+                    "intensity": 1
+                }
+            }
+        ]
+        return await self.collection.aggregate(pipeline).to_list(length=None)
 
     async def get_magnitude_distribution(self):
         """

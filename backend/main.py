@@ -7,6 +7,7 @@ import json
 from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 from db_mongo import mongo_handler
+from db_neo4j import neo4j_handler
 
 # Redis Subscriber Background Task
 async def redis_connector():
@@ -48,14 +49,33 @@ async def get_quakes(
     mag_max: float = None, 
     start_time: int = None, 
     end_time: int = None, 
+    depth_min: float = None,
+    depth_max: float = None,
+    north: float = None,
+    south: float = None,
+    east: float = None,
+    west: float = None,
     limit: int = 50
 ):
     """
     Fetch filtered earthquakes.
-    Example: /earthquakes?mag_min=5.0&limit=10
+    Example: /earthquakes?mag_min=5.0&limit=10&north=40&south=30
     """
-    quakes = await mongo_handler.get_earthquakes(mag_min, mag_max, start_time, end_time, limit)
+    quakes = await mongo_handler.get_earthquakes(
+        mag_min, mag_max, start_time, end_time, 
+        depth_min, depth_max, 
+        north, south, east, west, 
+        limit
+    )
     return quakes
+
+@app.get("/earthquakes/heatmap")
+async def get_heatmap(start_time: int, end_time: int):
+    """
+    Returns heatmap data (intensity per grid point).
+    Range: start_time to end_time (required).
+    """
+    return await mongo_handler.get_heatmap_data(start_time, end_time)
 
 @app.get("/analytics/magnitude-distribution")
 async def get_mag_dist():
@@ -151,6 +171,23 @@ async def get_unusual_activity():
     await redis_client.set(cache_key, json.dumps(anomalies), ex=3600) # 1h
     await redis_client.aclose()
     return anomalies
+
+
+
+@app.get("/earthquakes/{event_id}")
+async def get_earthquake_detail(event_id: str):
+    """
+    Fetch full details: Metadata (Mongo) + Relationships (Neo4j).
+    """
+    # 1. Fetch Core Metadata
+    mongo_data = await mongo_handler.get_event(event_id)
+    if not mongo_data:
+        raise HTTPException(status_code=404, detail="Earthquake not found")
+    
+    # 2. Fetch Graph Context (Cities, Faults)
+    graph_context = neo4j_handler.get_earthquake_context(event_id)
+    
+    return {**mongo_data, "context": graph_context}
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
