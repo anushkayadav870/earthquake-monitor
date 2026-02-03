@@ -15,7 +15,7 @@ MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "earthquake_db")
 
 # Neo4j Configuration
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "test1234")
 
@@ -27,3 +27,9 @@ ALERT_THRESHOLD = 5.0  # Global high-priority alert
 REGIONAL_ALERT_THRESHOLD = 3.5  # Lower threshold for high-risk zones
 ALERT_CHANNEL = "verified_alerts"
 HIGH_RISK_REGIONS = ["California", "CA", "Alaska", "AK", "Japan", "Mexico", "Turkey", "Indonesia", "Chile"]
+
+# --- LOCAL DEV OVERRIDE ---
+# Detect if we are running with Docker environment variables locally and fix them
+if "neo4j:" in NEO4J_URI: NEO4J_URI = "bolt://localhost:7687"
+if "mongo:" in MONGO_URI: MONGO_URI = "mongodb://localhost:27017"
+if "redis:" in REDIS_URL: REDIS_URL = "redis://localhost:6379"
