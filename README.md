@@ -35,7 +35,63 @@ The system is built across 5 phases of development:
 
 ## 🛠️ Technical Architecture
 
-This system uses a modern "Microservices" approach:
+The system uses a highly scalable, event-driven architecture to ensure no seismic event is missed.
+
+### System Architecture
+![Architecture Diagram](docs/architecture_diagram.png)
+
+### Data Flow Diagram (Mermaid)
+```mermaid
+graph TD
+    subgraph External
+        USGS["USGS Earthquake API"]
+    end
+
+    subgraph "Ingestion Layer (Producer)"
+        P["Producer (Python)"]
+        Dedup["Deduplication (Redis SET)"]
+    end
+
+    subgraph "Messaging & Real-time (Redis)"
+        Stream["Event Stream (XADD)"]
+        PubSub["Alert Channel (Pub/Sub)"]
+        Buffer["Recent Buffer (ZSET)"]
+    end
+
+    subgraph "Processing Layer (Worker)"
+        W["Async Worker (Python)"]
+        Geo["Geocoder (Nominatim)"]
+    end
+
+    subgraph "Storage Layer"
+        Mongo[("MongoDB (Primary)")]
+        Neo[("Neo4j (Graph Rel)")]
+    end
+
+    subgraph "Access Layer (API)"
+        API["FastAPI (Backend)"]
+        Cache["Response Cache (Redis)"]
+    end
+
+    %% Data Flow
+    USGS -->|Fetch every 30s| P
+    P --> Dedup
+    P -->|New Events| Stream
+    P -->|Alerts| PubSub
+    P -->|Recent Playback| Buffer
+    
+    Stream -->|Consume| W
+    W -->|Reverse Geocoding| Geo
+    W -->|Save Metadata| Mongo
+    W -->|Build Relationships| Neo
+    
+    Mongo --> API
+    Neo --> API
+    API -->|JSON Response| User["User (CURL / Browser)"]
+    API -.->|Cache Results| Cache
+```
+
+### Components
 *   **Backend (Python/FastAPI)**: The brain of the system, handling all logic and APIs.
 *   **Real-Time Pipeline (Redis)**: Ensures data flows instantly from the internet to your screen.
 *   **Primary Storage (MongoDB)**: Stores all historical and detailed earthquake data.
