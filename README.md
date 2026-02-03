@@ -1,69 +1,89 @@
-# Earthquake Monitor System
+# 🌍 Earthquake Monitor System
 
-A real-time earthquake monitoring system using microservices architecture.
+Welcome to the **Earthquake Monitor System**! This project is a real-time platform that tracks seismic activity worldwide, provides advanced analytics, and identifies relationships between earthquakes.
 
-## Tech Stack
-- **Frontend**: Vite + Vue/React (Port 5173)
-- **Backend**: Python FastAPI (Port 8000)
-- **Database 1**: MongoDB (Port 27017) - Primary storage
-- **Database 2**: Neo4j (Port 7474/7687) - Graph relationships (Faults/Regions)
-- **Message Broker**: Redis (Port 6379) - Stream processing
+---
 
-## Prerequisites
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be installed and running)
-2. Git
+## 🚀 Key Features
 
-## How to Run on a New Machine
+The system is built across 5 phases of development:
 
-### 1. Clone the Repository
-```bash
-git clone <your-repo-url>
-cd earthquake-monitor
-```
+### 📡 Phase 1: Live Monitoring (MVP)
+*   **Real-Time Feed**: Fetches live data from the USGS (U.S. Geological Survey) every 30 seconds.
+*   **Intelligent Processing**: Automatically processes and stores new events.
+*   **Instant Alerts**: Notifies about high-magnitude earthquakes significantly impacting regions.
 
-### 2. Configure Environment
-Ensure the `.env` file exists in the root directory. If not, create one with the following content:
+### 🗺️ Phase 2: Visualization & Exploration
+*   **Heatmaps**: Identifies "hot zones" of seismic activity.
+*   **Advanced Filtering**: Filter earthquakes by depth, specific regions (California, Alaska, etc.), magnitude, and time.
+*   **Event Details**: View full metadata including nearby cities and detailed location addresses.
 
-```env
-# MongoDB Config
-MONGO_URI=mongodb://mongo:27017/earthquake_db
-MONGO_DB_NAME=earthquake_db
+### 📊 Phase 3: Analytics & Intelligence
+*   **Trend Analysis**: Track daily earthquake counts over time.
+*   **Magnitude Distribution**: See how many earthquakes fall into different intensity levels.
+*   **Correlation Analytics**: Analyze the relationship between earthquake depth and magnitude.
 
-# Redis Config
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_URL=redis://redis:6379
+### 🕸️ Phase 4: Graph & Relationship Insights
+*   **Aftershock Detection**: Automatically links smaller earthquakes to their "Main Shocks" based on time and distance.
+*   **Cascade Event Detection**: Identifies potential triggered events across different fault zones (e.g., an earthquake in one fault triggering another nearby).
 
-# Neo4j Config
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=test1234  # Must be at least 8 chars
+### ⚖️ Phase 5: Risk & Prediction Insights
+*   **Regional Risk Scoring**: Calculates a 0-100 risk score for regions based on historical and recent activity.
+*   **Unusual Activity Alerts**: Detects spikes in activity that differ significantly from historical averages.
 
-# App Config
-DEBUG=True
-```
+---
 
-### 3. Start the System
-Run the following command to build and start all containers:
+## 🛠️ Technical Architecture
 
-```bash
-docker-compose up --build
-```
-*Note: The `--build` flag is important the first time to ensure all Python dependencies (like `neo4j` driver) are installed.*
+This system uses a modern "Microservices" approach:
+*   **Backend (Python/FastAPI)**: The brain of the system, handling all logic and APIs.
+*   **Real-Time Pipeline (Redis)**: Ensures data flows instantly from the internet to your screen.
+*   **Primary Storage (MongoDB)**: Stores all historical and detailed earthquake data.
+*   **Relationship Graph (Neo4j)**: Maps how earthquakes, regions, and fault lines are connected.
 
-### 4. Access the Services
-- **Web App**: [http://localhost:5173](http://localhost:5173)
-- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Neo4j Browser**: [http://localhost:7474](http://localhost:7474)
-    - User: `neo4j`
-    - Pass: `test1234`
-- **MongoDB**: Connect via `mongodb://localhost:27017`
+---
 
-## Troubleshooting
-- **Neo4j Access**: If you see "WebSocket connection failure", ensure the password is at least 8 characters.
-- **Connection Refused**: Ensure Docker Desktop is running (`docker ps`).
-- **Volume Errors**: If Neo4j fails to start due to "UnsupportedLogVersion", run:
-  ```bash
-  docker-compose down -v
-  docker-compose up --build
-  ```
+## 🏃 How to Run the Project
+
+### Prerequisites
+1.  **Docker Desktop**: Required to run the databases and system. [Download here](https://www.docker.com/products/docker-desktop/).
+2.  **VS Code**: Recommended for viewing the code.
+
+### Quick Start
+1.  **Open Docker Desktop** and ensure it is running.
+2.  Open your terminal or command prompt in the project root folder.
+3.  Run the following command:
+    ```bash
+    docker-compose up --build
+    ```
+4.  Wait for the logs to stop scrolling. The first run might take 1-2 minutes to download everything.
+
+---
+
+## 📍 Access Links
+*   **Main Web App**: [http://localhost:5173](http://localhost:5173) (Currently under development)
+*   **Interactive API Dashboard**: [http://localhost:8000/docs](http://localhost:8000/docs) (Best for testing features!)
+*   **Neo4j Graph Browser**: [http://localhost:7474](http://localhost:7474) (Login: `neo4j` / Password: `test1234`)
+
+---
+
+## 🧪 Testing the Features (For Professor)
+
+Use these links in your browser to see the "live" intelligence of the engine:
+
+1.  **Live Updates**: [Latest Earthquakes](http://localhost:8000/earthquakes/latest)
+2.  **Risk Scores**: [Top Risk Regions](http://localhost:8000/analytics/risk-scores)
+3.  **Aftershocks**: [Detected Sequences](http://localhost:8000/analytics/aftershocks)
+4.  **Heatmap Data**: [Seismic Density](http://localhost:8000/earthquakes/heatmap?start_time=0&end_time=9999999999999)
+5.  **Anomalies**: [Unusual Activity Report](http://localhost:8000/analytics/unusual-activity)
+
+---
+
+## 🛠️ Troubleshooting
+*   **Connection Refused**: Ensure Docker Desktop is running.
+*   **Neo4j Login**: Use password `test1234`. If it asks to change, you can skip or use the same one.
+*   **System Reset**: To clear all data and start fresh:
+    ```bash
+    docker-compose down -v
+    docker-compose up --build
+    ```

@@ -7,6 +7,8 @@ USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_ho
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_KEY = "earthquake_stream"
 LIVE_CHANNEL = "live_earthquakes"
+EVENT_BUFFER_KEY = "recent_events"
+BUFFER_SIZE = 500
 
 # MongoDB Configuration
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
@@ -21,5 +23,7 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "test1234")
 FETCH_INTERVAL = 30  # seconds
 
 # Alert Configuration
-ALERT_THRESHOLD = 1.0
+ALERT_THRESHOLD = 5.0  # Global high-priority alert
+REGIONAL_ALERT_THRESHOLD = 3.5  # Lower threshold for high-risk zones
 ALERT_CHANNEL = "verified_alerts"
+HIGH_RISK_REGIONS = ["California", "CA", "Alaska", "AK", "Japan", "Mexico", "Turkey", "Indonesia", "Chile"]

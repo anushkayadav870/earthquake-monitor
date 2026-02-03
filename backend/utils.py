@@ -1,4 +1,12 @@
-from datetime import datetime
+import json
+from bson import ObjectId
+
+class MongoJSONEncoder(json.JSONEncoder):
+    """JSON encoder that converts MongoDB ObjectId to strings."""
+    def default(self, obj):
+        if isinstance(obj, ObjectId):
+            return str(obj)
+        return super().default(obj)
 
 def format_timestamp(epoch_ms):
     """

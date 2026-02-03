@@ -30,16 +30,20 @@ async def push_to_redis(redis_client, data):
         properties = feature["properties"]
         geometry = feature["geometry"]
 
+        magnitude = float(properties.get("mag") or 0.0)
+        place = str(properties.get("place") or "Unknown")
+        timestamp = int(properties.get("time") or 0)
+
         event_data = {
             "id": str(event_id),
-            "magnitude": str(properties.get("mag") or 0.0),
-            "place": str(properties.get("place") or "Unknown"),
-            "time": str(properties.get("time") or ""),
+            "magnitude": str(magnitude),
+            "place": place,
+            "time": str(timestamp),
             "url": str(properties.get("url") or ""),
             "longitude": str(geometry["coordinates"][0]),
             "latitude": str(geometry["coordinates"][1]),
             "depth": str(geometry["coordinates"][2]),
-            "raw_json": json.dumps(feature) # Store full raw data just in case
+            "raw_json": json.dumps(feature) # Store full raw data
         }
 
         try:
@@ -50,19 +54,29 @@ async def push_to_redis(redis_client, data):
             if not is_new:
                 continue
             
-            # 2. CHECK FOR ALERTS
-            magnitude = float(properties.get("mag") or 0.0)
-            if magnitude >= ALERT_THRESHOLD:
+            # 2. REDIS BUFFER (Phase 2.4 - Time-lapse/Playback support)
+            # Use ZSET with timestamp as score for fast range queries
+            from config import EVENT_BUFFER_KEY, BUFFER_SIZE
+            await redis_client.zadd(EVENT_BUFFER_KEY, {json.dumps(event_data): timestamp})
+            # Keep buffer size limited
+            await redis_client.zremrangebyrank(EVENT_BUFFER_KEY, 0, -(BUFFER_SIZE + 1))
+
+            # 3. ENHANCED ALERTS (Phase 1.2 - Regional rules)
+            from config import ALERT_THRESHOLD, REGIONAL_ALERT_THRESHOLD, HIGH_RISK_REGIONS, ALERT_CHANNEL
+            
+            is_high_risk_region = any(region in place for region in HIGH_RISK_REGIONS)
+            threshold = REGIONAL_ALERT_THRESHOLD if is_high_risk_region else ALERT_THRESHOLD
+
+            if magnitude >= threshold:
                 event_data["is_alert"] = "true" 
                 alert_payload = {
                     "event": event_data,
-                    "message": f"ALERT: Magnitude {magnitude} earthquake detected near {event_data['place']}"
+                    "message": f"{'REGIONAL ' if is_high_risk_region else ''}ALERT: Magnitude {magnitude} earthquake detected near {place}"
                 }
-                # Publish to separate Alert Channel
                 await redis_client.publish(ALERT_CHANNEL, json.dumps(alert_payload))
                 print(f"*** TRIGGERED ALERT FOR EVENT {event_id} (Mag {magnitude}) ***")
 
-            # XADD: Appends to stream. ID='*' means auto-generate ID.
+            # XADD: Appends to stream for worker processing
             await redis_client.xadd(STREAM_KEY, event_data)
             
             # PUBLISH: Broadcast to real-time subscribers
@@ -72,7 +86,7 @@ async def push_to_redis(redis_client, data):
         except Exception as e:
             print(f"Error pushing to Redis: {e}")
 
-    print(f"Pushed {count} events to Redis Stream '{STREAM_KEY}'.")
+    print(f"Pushed {count} events to Redis Stream '{STREAM_KEY}' and Buffer.")
 
 async def main():
     print(f"Starting Earthquake Producer...")

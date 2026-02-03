@@ -8,6 +8,7 @@ from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 from db_mongo import mongo_handler
 from db_neo4j import neo4j_handler
+from utils import MongoJSONEncoder
 
 # Redis Subscriber Background Task
 async def redis_connector():
@@ -79,6 +80,22 @@ async def get_heatmap(start_time: int, end_time: int):
     """
     return await mongo_handler.get_heatmap_data(start_time, end_time)
 
+@app.get("/earthquakes/latest")
+async def get_latest_earthquakes(limit: int = 50):
+    """
+    Fetch the most recent earthquakes from the Redis buffer (Phase 2.4).
+    Fast access for real-time dashboard/playback.
+    """
+    from config import EVENT_BUFFER_KEY
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    
+    # Get top N elements from ZSET (sorted by score/timestamp descending)
+    events_raw = await redis_client.zrevrange(EVENT_BUFFER_KEY, 0, limit - 1)
+    await redis_client.aclose()
+    
+    events = [json.loads(e) for e in events_raw]
+    return events
+
 @app.get("/analytics/magnitude-distribution")
 async def get_mag_dist():
     """
@@ -94,7 +111,7 @@ async def get_mag_dist():
         return json.loads(cached_data)
     
     dist = await mongo_handler.get_magnitude_distribution()
-    await redis_client.set(cache_key, json.dumps(dist), ex=600)
+    await redis_client.set(cache_key, json.dumps(dist, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return dist
 
@@ -113,7 +130,7 @@ async def get_mag_trends():
         return json.loads(cached_data)
     
     trends = await mongo_handler.get_magnitude_trends()
-    await redis_client.set(cache_key, json.dumps(trends), ex=600)
+    await redis_client.set(cache_key, json.dumps(trends, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return trends
 
@@ -132,7 +149,7 @@ async def get_depth_mag():
         return json.loads(cached_data)
     
     data = await mongo_handler.get_depth_vs_magnitude()
-    await redis_client.set(cache_key, json.dumps(data), ex=3600)
+    await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=3600)
     await redis_client.aclose()
     return data
 
@@ -151,7 +168,7 @@ async def get_risk_scores():
         return json.loads(cached_data)
     
     scores = await mongo_handler.get_regional_risk_scores()
-    await redis_client.set(cache_key, json.dumps(scores), ex=86400) # 24h
+    await redis_client.set(cache_key, json.dumps(scores, cls=MongoJSONEncoder), ex=86400) # 24h
     await redis_client.aclose()
     return scores
 
@@ -170,9 +187,47 @@ async def get_unusual_activity():
         return json.loads(cached_data)
     
     anomalies = await mongo_handler.get_unusual_activity_detection()
-    await redis_client.set(cache_key, json.dumps(anomalies), ex=3600) # 1h
+    await redis_client.set(cache_key, json.dumps(anomalies, cls=MongoJSONEncoder), ex=3600) # 1h
     await redis_client.aclose()
     return anomalies
+
+@app.get("/analytics/aftershocks")
+async def get_aftershocks(limit: int = 50):
+    """
+    Get identified aftershock sequences from Neo4j.
+    Caches results for 10 minutes.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = f"analytics:aftershocks:{limit}"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    data = neo4j_handler.get_aftershock_sequences(limit)
+    await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=600)
+    await redis_client.aclose()
+    return data
+
+@app.get("/analytics/cascades")
+async def get_cascades(limit: int = 50):
+    """
+    Get identified cascade (triggered) events from Neo4j.
+    Caches results for 10 minutes.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = f"analytics:cascades:{limit}"
+    
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+    
+    data = neo4j_handler.get_cascade_events(limit)
+    await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=600)
+    await redis_client.aclose()
+    return data
 
 
 

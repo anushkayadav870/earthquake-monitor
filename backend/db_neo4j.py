@@ -210,4 +210,60 @@ class Neo4jHandler:
             print(f"Error fetching Neo4j context: {e}")
             return {}
 
+    def get_aftershock_sequences(self, limit=50):
+        """
+        Retrieves earthquakes that are part of an aftershock sequence.
+        """
+        query = """
+        MATCH (after:Earthquake)-[r:PART_OF_SEQUENCE]->(main:Earthquake)
+        RETURN after, r, main
+        ORDER BY after.time DESC
+        LIMIT $limit
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, limit=limit)
+                sequences = []
+                for record in result:
+                    after = dict(record["after"])
+                    main = dict(record["main"])
+                    rel = dict(record["r"])
+                    sequences.append({
+                        "aftershock": after,
+                        "main_shock": main,
+                        "details": rel
+                    })
+                return sequences
+        except Exception as e:
+            print(f"Error fetching aftershocks: {e}")
+            return []
+
+    def get_cascade_events(self, limit=50):
+        """
+        Retrieves earthquakes that are identified as possible triggered events.
+        """
+        query = """
+        MATCH (trigger:Earthquake)-[r:POSSIBLE_TRIGGERED_EVENT]->(triggered:Earthquake)
+        RETURN trigger, r, triggered
+        ORDER BY triggered.time DESC
+        LIMIT $limit
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, limit=limit)
+                cascades = []
+                for record in result:
+                    trigger = dict(record["trigger"])
+                    triggered = dict(record["triggered"])
+                    rel = dict(record["r"])
+                    cascades.append({
+                        "triggering_event": trigger,
+                        "triggered_event": triggered,
+                        "details": rel
+                    })
+                return cascades
+        except Exception as e:
+            print(f"Error fetching cascades: {e}")
+            return []
+
 neo4j_handler = Neo4jHandler()
