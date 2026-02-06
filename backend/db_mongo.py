@@ -242,6 +242,33 @@ class MongoHandler:
         cursor = self.collection.aggregate(pipeline)
         return await cursor.to_list(length=limit)
 
+    async def get_top_regions(self, limit=10):
+        """
+        Returns top regions by earthquake count using the last segment of the place string.
+        """
+        pipeline = [
+            {
+                "$project": {
+                    "region": {
+                        "$trim": {
+                            "input": {"$arrayElemAt": [{"$split": ["$place", ","]}, -1]}
+                        }
+                    }
+                }
+            },
+            {"$match": {"region": {"$ne": None, "$ne": ""}}},
+            {
+                "$group": {
+                    "_id": "$region",
+                    "count": {"$sum": 1}
+                }
+            },
+            {"$sort": {"count": -1}},
+            {"$limit": limit}
+        ]
+        cursor = self.collection.aggregate(pipeline)
+        return await cursor.to_list(length=limit)
+
     async def get_regional_risk_scores(self, limit=10):
         """
         Calculates a risk score (0-100) per region based on:

@@ -266,4 +266,5 @@ class Neo4jHandler:
             print(f"Error fetching cascades: {e}")
             return []
 
+
 neo4j_handler = Neo4jHandler()

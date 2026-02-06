@@ -1,0 +1,16 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
+.turbo/
+.vercel/
+

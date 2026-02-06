@@ -29,7 +29,9 @@ ALERT_CHANNEL = "verified_alerts"
 HIGH_RISK_REGIONS = ["California", "CA", "Alaska", "AK", "Japan", "Mexico", "Turkey", "Indonesia", "Chile"]
 
 # --- LOCAL DEV OVERRIDE ---
-# Detect if we are running with Docker environment variables locally and fix them
-if "neo4j:" in NEO4J_URI: NEO4J_URI = "bolt://localhost:7687"
-if "mongo:" in MONGO_URI: MONGO_URI = "mongodb://localhost:27017"
-if "redis:" in REDIS_URL: REDIS_URL = "redis://localhost:6379"
+# NOTE: Removed automatic overrides that replaced Docker service hostnames with
+# `localhost` inside the container. Those overrides caused the app to attempt
+# connecting to `localhost` (which refers to the container itself) and fail to
+# reach the actual services running in other containers. If you need different
+# host settings for local development, set the environment variables explicitly
+# in the `.env` file (e.g., MONGO_URI, NEO4J_URI, REDIS_URL).

@@ -40,6 +40,20 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# CORS: allow local dev frontends to access the API
+from fastapi.middleware.cors import CORSMiddleware
+
+# Default allowed origins - can be overridden with CORS_ORIGINS env (comma-separated)
+_origin_str = os.getenv("CORS_ORIGINS", "http://localhost:3000,http://localhost:5173,http://localhost:5174")
+_allowed_origins = [o.strip() for o in _origin_str.split(",") if o.strip()]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=_allowed_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.get("/")
 def read_root():
     return {"message": "Hello from Earthquake Monitor Backend!"}
@@ -110,7 +124,17 @@ async def get_mag_dist():
         await redis_client.aclose()
         return json.loads(cached_data)
     
-    dist = await mongo_handler.get_magnitude_distribution()
+    raw = await mongo_handler.get_magnitude_distribution()
+    dist = []
+    for item in raw:
+        bucket_id = item.get("_id")
+        if bucket_id == "Other":
+            label = "Other"
+        elif isinstance(bucket_id, (int, float)):
+            label = f"{int(bucket_id)}-{int(bucket_id) + 1}"
+        else:
+            label = str(bucket_id)
+        dist.append({"bucket": label, "count": item.get("count", 0)})
     await redis_client.set(cache_key, json.dumps(dist, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return dist
@@ -129,7 +153,8 @@ async def get_mag_trends():
         await redis_client.aclose()
         return json.loads(cached_data)
     
-    trends = await mongo_handler.get_magnitude_trends()
+    raw = await mongo_handler.get_magnitude_trends()
+    trends = [{"label": item.get("_id"), "count": item.get("count", 0)} for item in raw]
     await redis_client.set(cache_key, json.dumps(trends, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return trends
@@ -148,8 +173,43 @@ async def get_depth_mag():
         await redis_client.aclose()
         return json.loads(cached_data)
     
-    data = await mongo_handler.get_depth_vs_magnitude()
+    raw = await mongo_handler.get_depth_vs_magnitude()
+    data = [{"magnitude": d.get("magnitude"), "depth": d.get("depth")} for d in raw]
     await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=3600)
+    await redis_client.aclose()
+    return data
+
+@app.get("/analytics/trends")
+async def get_trends_alias():
+    """
+    Alias for /analytics/magnitude-trends with frontend-friendly shape.
+    """
+    return await get_mag_trends()
+
+@app.get("/analytics/depth-magnitude")
+async def get_depth_magnitude_alias():
+    """
+    Alias for /analytics/depth-vs-magnitude with frontend-friendly shape.
+    """
+    return await get_depth_mag()
+
+@app.get("/analytics/top-regions")
+async def get_top_regions(limit: int = 10):
+    """
+    Get top regions by earthquake count.
+    Caches results for 10 minutes.
+    """
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    cache_key = f"analytics:top_regions:{limit}"
+
+    cached_data = await redis_client.get(cache_key)
+    if cached_data:
+        await redis_client.aclose()
+        return json.loads(cached_data)
+
+    raw = await mongo_handler.get_top_regions(limit=limit)
+    data = [{"region": item.get("_id"), "count": item.get("count", 0)} for item in raw]
+    await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return data
 
@@ -228,6 +288,7 @@ async def get_cascades(limit: int = 50):
     await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return data
+
 
 
 
