@@ -77,12 +77,13 @@ class Neo4jHandler:
                     e.location = point({latitude: toFloat($lat), longitude: toFloat($lon)})
                 
                 MERGE (e)-[:OCCURRED_NEAR]->(c)
+                MERGE (e)-[:OCCURRED_IN]->(r)
                 
                 // Link to Fault Zone (if within 200km of our mock points)
                 WITH e, c
                 MATCH (fz:FaultZone)
                 WHERE point.distance(e.location, fz.location) < 200000 
-                MERGE (e)-[:ON_FAULT]->(fz)
+                MERGE (e)-[:ON_FAULTLINE]->(fz)
                 
                 // Link to Affected Cities (Impact Radius)
                 WITH e, $impact_km AS radius
@@ -103,9 +104,93 @@ class Neo4jHandler:
                 lon=data["longitude"],
                 impact_km=impact_km
             )
+
+            # Link to Cluster if present
+            cluster_id = data.get("cluster_id")
+            if cluster_id:
+                self.link_earthquake_to_cluster(data["id"], cluster_id)
             
-            self._link_aftershocks(session, data)
+            self._link_related_events(session, data)
             self._detect_cascades(session, data)
+
+    def sync_clusters(self, clusters):
+        """
+        Batch ingest cluster data from MongoDB.
+        Also updates the EPICENTER_OF relationship to the max mag event.
+        """
+        query = """
+        UNWIND $clusters AS c
+        MERGE (cl:Cluster {id: c.cluster_id})
+        SET cl.centroid = point({latitude: c.centroid.coordinates[1], longitude: c.centroid.coordinates[0]}),
+            cl.event_count = toInteger(c.event_count),
+            cl.avg_magnitude = toFloat(c.avg_magnitude),
+            cl.start_time = toInteger(c.start_time),
+            cl.end_time = toInteger(c.end_time)
+            
+        // Find the event with max magnitude in this cluster and mark as Epicenter
+        WITH cl
+        MATCH (e:Earthquake)-[:BELONGS_TO_CLUSTER]->(cl)
+        WITH cl, e, e.mag as mag
+        ORDER BY mag DESC
+        LIMIT 1
+        MERGE (cl)-[:EPICENTER_OF]->(e)
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, clusters=clusters)
+        except Exception as e:
+            print(f"Error syncing clusters to Neo4j: {e}")
+
+    def clear_clusters(self):
+        """
+        Deletes all Cluster nodes and their relationships.
+        """
+        query = "MATCH (c:Cluster) DETACH DELETE c"
+        try:
+            with self.driver.session() as session:
+                session.run(query)
+                # print("Cleared all clusters from Neo4j.")
+        except Exception as e:
+            print(f"Error clearing clusters in Neo4j: {e}")
+
+    def link_earthquake_to_cluster(self, eq_id, cluster_id):
+        """
+        Creates a BELONGS_TO_CLUSTER relationship.
+        """
+        query = """
+        MATCH (e:Earthquake {id: $eq_id})
+        MATCH (c:Cluster {id: $cluster_id})
+        MERGE (e)-[:BELONGS_TO_CLUSTER]->(c)
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, eq_id=eq_id, cluster_id=cluster_id)
+        except Exception as e:
+            print(f"Error linking earthquake to cluster in Neo4j: {e}")
+
+    def create_near_relationships(self, max_dist_km=50, max_time_diff_hr=48):
+        """
+        Creates NEAR relationships between earthquakes based on proximity in space and time.
+        """
+        query = """
+        MATCH (e1:Earthquake), (e2:Earthquake)
+        WHERE e1.id < e2.id
+        AND e1.location IS NOT NULL AND e2.location IS NOT NULL
+        
+        WITH e1, e2,
+             point.distance(e1.location, e2.location) / 1000 AS dist_km,
+             abs(toInteger(e1.time) - toInteger(e2.time)) / (1000 * 3600.0) AS hours_diff
+             
+        WHERE dist_km < $max_dist_km AND hours_diff < $max_time_diff_hr
+        MERGE (e1)-[r:NEAR]->(e2)
+        SET r.distance_km = dist_km,
+            r.time_diff_hr = hours_diff
+        """
+        try:
+            with self.driver.session() as session:
+                session.run(query, max_dist_km=max_dist_km, max_time_diff_hr=max_time_diff_hr)
+        except Exception as e:
+            print(f"Error creating NEAR relationships in Neo4j: {e}")
 
     def _extract_location_details(self, place):
         if "," in place:
@@ -122,46 +207,46 @@ class Neo4jHandler:
             
         return region, city
 
-    def _link_aftershocks(self, session, data):
+    def _link_related_events(self, session, data):
         """
-        Connects this earthquake to a 'Main Shock' in the graph if it meets criteria:
-        - Within 50km
-        - Within 7 days
-        - Main Shock magnitude >= 5.0
+        Connects this earthquake to a 'Main Shock' (AFTERSHOCK_OF) or 'Future Shock' (FORESHOCK_OF).
         """
         query = """
         MATCH (new:Earthquake {id: $id})
-        MATCH (main:Earthquake)
-        WHERE main.id <> new.id
-        AND main.mag >= 5.0
-        AND new.location IS NOT NULL AND main.location IS NOT NULL
+        MATCH (other:Earthquake)
+        WHERE other.id <> new.id
+        AND other.mag >= 5.0
+        AND new.location IS NOT NULL AND other.location IS NOT NULL
         
-        // Convert to integers for subtraction in case already stored as strings
-        WITH new, main, 
-             point.distance(new.location, main.location) / 1000 AS dist_km,
-             (toInteger(new.time) - toInteger(main.time)) / (1000 * 60 * 60 * 24.0) AS days_diff
+        WITH new, other, 
+             point.distance(new.location, other.location) / 1000 AS dist_km,
+             (toInteger(new.time) - toInteger(other.time)) / (1000 * 60 * 60 * 24.0) AS days_diff
              
         WHERE dist_km < 50 
-        AND days_diff > 0 AND days_diff <= 7
+        AND abs(days_diff) <= 7 
         
-        MERGE (new)-[r:PART_OF_SEQUENCE]->(main)
-        SET r.type = "Aftershock",
-            r.distance_km = dist_km,
-            r.time_diff_days = days_diff
+        // Determine relationship type dynamically
+        FOREACH (_ IN CASE WHEN days_diff > 0 THEN [1] ELSE [] END |
+            MERGE (new)-[r:AFTERSHOCK_OF]->(other)
+            SET r.distance_km = dist_km, r.time_diff_days = days_diff
+        )
+        FOREACH (_ IN CASE WHEN days_diff < 0 THEN [1] ELSE [] END |
+            MERGE (new)-[r:FORESHOCK_OF]->(other)
+            SET r.distance_km = dist_km, r.time_diff_days = days_diff
+        )
         """
         try:
             session.run(query, id=data["id"])
         except Exception as e:
-            print(f"Error linking aftershocks: {e}")
+            print(f"Error linking related events: {e}")
 
     def _detect_cascades(self, session, data):
         """
-        Detects potential triggered events across different fault zones.
-        Criteria: different faults, < 200km distance, < 48 hours time gap.
+        Detects potential TRIGGERED events across different fault zones.
         """
         query = """
-        MATCH (new:Earthquake {id: $id})-[:ON_FAULT]->(fz1:FaultZone)
-        MATCH (other:Earthquake)-[:ON_FAULT]->(fz2:FaultZone)
+        MATCH (new:Earthquake {id: $id})-[:ON_FAULTLINE]->(fz1:FaultZone)
+        MATCH (other:Earthquake)-[:ON_FAULTLINE]->(fz2:FaultZone)
         WHERE fz1 <> fz2 
         AND other.id <> new.id
         AND other.mag >= 4.0
@@ -171,7 +256,7 @@ class Neo4jHandler:
              abs(toInteger(new.time) - toInteger(other.time)) / (1000 * 60 * 60.0) AS hours_diff
              
         WHERE dist_km < 200 AND hours_diff < 48
-        MERGE (other)-[r:POSSIBLE_TRIGGERED_EVENT]->(new)
+        MERGE (other)-[r:TRIGGERED]->(new)
         SET r.distance_km = dist_km,
             r.hours_diff = hours_diff,
             r.from_fault = fz2.name,
@@ -210,38 +295,6 @@ class Neo4jHandler:
             print(f"Error fetching Neo4j context: {e}")
             return {}
 
-    def get_aftershock_sequences(self, limit=50):
-        """
-        Retrieves earthquakes that are part of an aftershock sequence.
-        """
-        query = """
-        MATCH (after:Earthquake)-[r:PART_OF_SEQUENCE]->(main:Earthquake)
-        RETURN after, r, main
-        ORDER BY after.time DESC
-        LIMIT $limit
-        """
-        try:
-            with self.driver.session() as session:
-                result = session.run(query, limit=limit)
-                sequences = []
-                for record in result:
-                    after = dict(record["after"])
-                    main = dict(record["main"])
-                    rel = dict(record["r"])
-                    sequences.append({
-                        "aftershock": after,
-                        "main_shock": main,
-                        "details": rel
-                    })
-                return sequences
-        except Exception as e:
-            print(f"Error fetching aftershocks: {e}")
-            return []
-
-    def get_cascade_events(self, limit=50):
-        """
-        Retrieves earthquakes that are identified as possible triggered events.
-        """
         query = """
         MATCH (trigger:Earthquake)-[r:POSSIBLE_TRIGGERED_EVENT]->(triggered:Earthquake)
         RETURN trigger, r, triggered
@@ -266,5 +319,194 @@ class Neo4jHandler:
             print(f"Error fetching cascades: {e}")
             return []
 
+
+    def get_graph_data(self, min_mag=0, max_mag=10, start_time=None, end_time=None, cluster_id=None, relationship_types=None):
+        """
+        Fetches nodes and edges for graph visualization based on filters.
+        relationship_types: List of strings e.g. ["AFTERSHOCK_OF", "NEAR"]
+        """
+        # Base query to fetch quakes and their relations
+        query = """
+        MATCH (e:Earthquake)
+        WHERE e.mag >= $min_mag AND e.mag <= $max_mag
+        """
+        
+        if start_time:
+            query += " AND e.time >= $start_time"
+        if end_time:
+            query += " AND e.time <= $end_time"
+        if cluster_id:
+            query += " AND e.cluster_id = $cluster_id"
+            
+        # Define Semantic vs Generic types
+        semantic_set = {"AFTERSHOCK_OF", "FORESHOCK_OF", "TRIGGERED", "BELONGS_TO_CLUSTER", "ON_FAULTLINE", "EPICENTER_OF"}
+        generic_set = {"NEAR", "OCCURRED_IN"}
+        
+        # If no types specified, fetch ALL (default behavior)
+        if not relationship_types:
+            target_semantic = list(semantic_set)
+            target_generic = list(generic_set)
+        else:
+            target_semantic = [t for t in relationship_types if t in semantic_set]
+            target_generic = [t for t in relationship_types if t in generic_set]
+
+        # Query 1: Fetch Semantic Relationships (High Priority)
+        if target_semantic:
+            sem_types_str = "|" + "|".join(target_semantic) # e.g. "|AFTERSHOCK_OF|TRIGGERED"
+            # Remove leading pipe for valid syntax if needed, but here we need :TYPE|TYPE
+            sem_types_str = sem_types_str[1:] 
+            
+            query_semantic = query + f"""
+            MATCH (e)-[r:{sem_types_str}]->(target)
+            RETURN e, r, target
+            LIMIT 2000
+            """
+        else:
+            query_semantic = None
+
+        # Query 2: Fetch Spatial Relationships (Lower Priority, sampled)
+        if target_generic:
+            gen_types_str = "|".join(target_generic)
+            query_generic = query + f"""
+            MATCH (e)-[r:{gen_types_str}]->(target)
+            RETURN e, r, target
+            LIMIT 1000
+            """
+        else:
+            query_generic = None
+        
+        nodes = {}
+        edges = []
+
+        try:
+            with self.driver.session() as session:
+                # Run Semantic Query
+                if query_semantic:
+                    result_sem = session.run(query_semantic, min_mag=min_mag, max_mag=max_mag, 
+                                         start_time=start_time, end_time=end_time, cluster_id=cluster_id)
+                    
+                    for record in result_sem:
+                        self._process_graph_record(record, nodes, edges)
+
+                # Run Generic Query
+                if query_generic:
+                    result_gen = session.run(query_generic, min_mag=min_mag, max_mag=max_mag, 
+                                         start_time=start_time, end_time=end_time, cluster_id=cluster_id)
+                    
+                    for record in result_gen:
+                        self._process_graph_record(record, nodes, edges)
+
+                return {"nodes": list(nodes.values()), "edges": edges}
+        except Exception as e:
+            print(f"Error fetching graph data: {e}")
+            return {"nodes": [], "edges": []}
+
+    def _process_graph_record(self, record, nodes, edges):
+        e = record["e"]
+        if e["id"] not in nodes:
+            nodes[e["id"]] = {
+                "id": e["id"],
+                "label": "Earthquake",
+                "mag": e["mag"],
+                "time": e["time"],
+                "lat": e["location"].latitude if e.get("location") else None,
+                "lon": e["location"].longitude if e.get("location") else None,
+                "cluster_id": e.get("cluster_id")
+            }
+        
+        target = record["target"]
+        if target:
+            target_id = target.get("id") or target.get("name") # City/Fault/Cluster
+            label = list(target.labels)[0] if hasattr(target, 'labels') else "Unknown"
+            
+            if target_id not in nodes:
+                nodes[target_id] = {
+                    "id": target_id,
+                    "label": label,
+                    "name": target.get("name")
+                }
+                if label == "Cluster":
+                    nodes[target_id].update({
+                        "event_count": target.get("event_count"),
+                        "avg_mag": target.get("avg_magnitude")
+                    })
+            
+            rel = record["r"]
+            # Avoid duplicates if edges are fetched twice (unlikely with distinct types but good practice)
+            edge_key = f"{e['id']}-{target_id}-{rel.type}"
+            # Check if edge exists? For performance, we'll assign unique generic IDs in frontend or here.
+            # Just append.
+            edges.append({
+                "source": e["id"],
+                "target": target_id,
+                "type": rel.type,
+                "dist_km": rel.get("distance_km")
+            })
+
+    def get_top_central_quakes(self, limit=10):
+        """
+        Finds quakes with most connections (using DEGREE centrality as proxy).
+        Requires GDS if we wanted PageRank, but simple Cypher works for Degree.
+        """
+        query = """
+        MATCH (e:Earthquake)-[r]-()
+        RETURN e, count(r) AS degree
+        ORDER BY degree DESC
+        LIMIT $limit
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, limit=limit)
+                return [{"id": r["e"]["id"], "mag": r["e"]["mag"], "degree": r["degree"]} for r in result]
+        except Exception as e:
+            print(f"Error fetching top central quakes: {e}")
+            return []
+
+    def get_node_neighbors(self, node_id):
+        """
+        Fetches immediate neighbors of a specific node (1-hop).
+        """
+        query = """
+        MATCH (n {id: $node_id})-[r]-(m)
+        RETURN n, r, m
+        LIMIT 50
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, node_id=node_id)
+                neighbors = []
+                center_node = None
+                
+                for record in result:
+                    if not center_node:
+                        n = record["n"]
+                        center_node = dict(n)
+                        center_node["labels"] = list(n.labels)
+                    
+                    m = record["m"]
+                    r = record["r"]
+                    
+                    neighbor_node = dict(m)
+                    neighbor_node["labels"] = list(m.labels)
+                    # Helper: clean up Neo4j types for JSON (e.g. spatial Point)
+                    if "location" in neighbor_node:
+                        loc = neighbor_node["location"]
+                        neighbor_node["lat"] = loc.latitude
+                        neighbor_node["lon"] = loc.longitude
+                        del neighbor_node["location"]
+                        
+                    neighbors.append({
+                        "node": neighbor_node,
+                        "relationship": {
+                            "type": r.type,
+                            "properties": dict(r),
+                            "direction": "out" if r.start_node.element_id == record["n"].element_id else "in"
+                        }
+                    })
+                    
+                return {"center": center_node, "neighbors": neighbors}
+        except Exception as e:
+            print(f"Error fetching node neighbors: {e}")
+            return {"center": None, "neighbors": []}
 
 neo4j_handler = Neo4jHandler()

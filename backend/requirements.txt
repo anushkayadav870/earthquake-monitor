@@ -6,3 +6,6 @@ motor
 websockets
 neo4j
 geopy
+numpy
+pandas
+scikit-learn

@@ -7,6 +7,7 @@ from db_neo4j import neo4j_handler
 from geocoder import geocoder
 from utils import format_timestamp
 from producer import main as run_producer_loop
+from clustering import ClusteringEngine
 
 CONSUMER_GROUP = "analytics_group"
 CONSUMER_NAME = "worker_1"
@@ -109,6 +110,32 @@ async def run_consumer_loop():
             print(f"Consumer loop error: {e}")
             await asyncio.sleep(5)
 
+async def run_clustering_listener():
+    print("Starting Clustering Listener...")
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    pubsub = redis_client.pubsub()
+    await pubsub.subscribe("control_channel")
+    
+    clustering_engine = ClusteringEngine()
+    
+    # Run once on startup to ensure clusters are fresh
+    await clustering_engine.run_clustering()
+    
+    try:
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = message["data"]
+                if data == "recluster":
+                    # Fetch latest config to log what we are using
+                    config = await clustering_engine.get_config()
+                    print(f"[Worker] RECEIVED recluster command. Using Config: {config}")
+                    count = await clustering_engine.run_clustering()
+                    print(f"[Worker] Re-clustering complete. Found {count} clusters.")
+    except Exception as e:
+        print(f"Clustering listener error: {e}")
+    finally:
+        await redis_client.aclose()
+
 async def main():
     # Initialize Databases
     await mongo_handler.initialize()
@@ -116,7 +143,8 @@ async def main():
     # Run both Producer and Consumer concurrently
     await asyncio.gather(
         run_producer_loop(),
-        run_consumer_loop()
+        run_consumer_loop(),
+        run_clustering_listener()
     )
 
 if __name__ == "__main__":

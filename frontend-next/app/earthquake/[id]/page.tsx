@@ -41,12 +41,6 @@ export default function EarthquakeDetailPage() {
   return (
     <div className="space-y-6">
       <EarthquakeDetailCard detail={detail} />
-      <AftershockTimeline events={detail?.aftershocks || []} />
-      <RelationshipSummary
-        faultLines={detail?.fault_lines || []}
-        regions={detail?.regions || []}
-        relatedEvents={detail?.related_events_count || 0}
-      />
     </div>
   )
 }

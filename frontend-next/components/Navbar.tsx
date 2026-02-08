@@ -7,10 +7,10 @@ export default function Navbar() {
         <a href="/" className="font-semibold text-lg tracking-tight">
           🌍 Earthquake Monitor
         </a>
-        <div className="flex items-center gap-4 text-sm">
-          <a href="/#map" className="text-slate-600 hover:text-slate-900">Map</a>
-          <a href="/#analytics" className="text-slate-600 hover:text-slate-900">Analytics</a>
-          <a href="/live-feed" className="text-indigo-600 hover:underline">Live Feed</a>
+        <div className="flex items-center gap-4 text-sm font-medium">
+          <a href="/" className="text-slate-600 hover:text-indigo-600 transition-colors">Map</a>
+          <a href="/analytics" className="text-slate-600 hover:text-indigo-600 transition-colors">Analytics</a>
+          <a href="/live-feed" className="text-indigo-600 font-bold hover:underline">Live Feed</a>
         </div>
       </div>
     </nav>

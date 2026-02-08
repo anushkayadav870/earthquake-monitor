@@ -28,6 +28,12 @@ REGIONAL_ALERT_THRESHOLD = 3.5  # Lower threshold for high-risk zones
 ALERT_CHANNEL = "verified_alerts"
 HIGH_RISK_REGIONS = ["California", "CA", "Alaska", "AK", "Japan", "Mexico", "Turkey", "Indonesia", "Chile"]
 
+# Clustering Configuration (Defaults)
+# These can be overridden by Environment Variables or at runtime via API/DB
+CLUSTERING_DISTANCE_KM = float(os.getenv("CLUSTERING_DISTANCE_KM", 50))
+CLUSTERING_TIME_WINDOW_HOURS = float(os.getenv("CLUSTERING_TIME_WINDOW_HOURS", 48))
+CLUSTERING_MIN_SAMPLES = int(os.getenv("CLUSTERING_MIN_SAMPLES", 3))
+
 # --- LOCAL DEV OVERRIDE ---
 # NOTE: Removed automatic overrides that replaced Docker service hostnames with
 # `localhost` inside the container. Those overrides caused the app to attempt

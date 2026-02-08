@@ -25,7 +25,8 @@ class MongoHandler:
         await self.collection.create_index([("location", "2dsphere")])
         await self.collection.create_index([("id", 1)], unique=True)
         await self.collection.create_index([("time", -1)])
-        print("[MongoDB] Geospatial and unique indexes verified.")
+        await self.collection.create_index([("cluster_id", 1)])
+        print("[MongoDB] Geospatial, unique, and cluster indexes verified.")
 
     async def insert_earthquake(self, data):
         """
@@ -59,6 +60,95 @@ class MongoHandler:
             
         except Exception as e:
             print(f"[Mongo] Error inserting earthquake {data.get('id')}: {e}")
+
+    async def update_earthquakes_with_cluster_id(self, updates):
+        """
+        Bulk update cluster_id for earthquakes.
+        updates: list of (earthquake_id, cluster_id) tuples or dicts
+        """
+        if not updates:
+            return
+
+        from pymongo import UpdateOne
+        operations = []
+        for eq_id, cluster_id in updates:
+            operations.append(
+                UpdateOne({"id": eq_id}, {"$set": {"cluster_id": cluster_id}})
+            )
+        
+        if operations:
+            result = await self.collection.bulk_write(operations)
+            print(f"[Mongo] Updated clusters for {result.modified_count} earthquakes")
+
+    async def clear_clusters(self):
+        """
+        Delete all documents in the clusters collection.
+        Used before re-populating to remove stale clusters.
+        """
+        await self.db["clusters"].delete_many({})
+        print("[Mongo] Cleared all clusters.")
+
+    async def update_clusters(self, clusters_data):
+        """
+        Replace all clusters with new data (or upsert).
+        clusters_data: list of dicts with cluster metadata
+        """
+        if not clusters_data:
+            return
+
+        # We might want to clear old clusters or just upsert. 
+        # For a full re-clustering, clearing might be safer to remove stale clusters,
+        # but upsert is safer for concurrent operations.
+        # Let's use a separate collection for cluster metadata.
+        cluster_collection = self.db["clusters"]
+        
+        # Ensure index on cluster_id
+        await cluster_collection.create_index([("cluster_id", 1)], unique=True)
+
+        from pymongo import ReplaceOne
+        operations = []
+        for cluster in clusters_data:
+            operations.append(
+                ReplaceOne(
+                    {"cluster_id": cluster["cluster_id"]}, 
+                    cluster, 
+                    upsert=True
+                )
+            )
+        
+        if operations:
+            await cluster_collection.bulk_write(operations)
+            print(f"[Mongo] Upserted {len(operations)} cluster metadata records")
+
+    async def get_clusters(self):
+        """
+        Retrieve all cluster metadata.
+        """
+        cluster_collection = self.db["clusters"]
+        cursor = cluster_collection.find({})
+        results = await cursor.to_list(length=None)
+        for r in results:
+            r["_id"] = str(r["_id"])
+        return results
+
+    async def get_clustering_config(self):
+        """
+        Get current clustering config from DB (or defaults).
+        """
+        config_collection = self.db["config"]
+        doc = await config_collection.find_one({"_id": "clustering_params"})
+        return doc or {}
+
+    async def set_clustering_config(self, params):
+        """
+        Update clustering config in DB.
+        """
+        config_collection = self.db["config"]
+        await config_collection.update_one(
+            {"_id": "clustering_params"},
+            {"$set": params},
+            upsert=True
+        )
 
     async def get_earthquakes(self, mag_min=None, mag_max=None, start_time=None, end_time=None, 
                               depth_min=None, depth_max=None, 
@@ -111,23 +201,79 @@ class MongoHandler:
         
         return results
 
-    async def get_heatmap_data(self, start_time: int, end_time: int):
+    async def get_heatmap_data(
+        self, 
+        start_time: int = None, 
+        end_time: int = None,
+        mag_min: float = None,
+        mag_max: float = None,
+        depth_min: float = None,
+        depth_max: float = None,
+        weight_by: str = "magnitude"
+    ):
         """
         Aggregates earthquake data into a grid for heatmaps.
         Groups events by rounded latitude/longitude (approx 10km grid).
+        Supports filtering and multiple weight modes.
         """
+        # Build match conditions
+        match_conditions = {
+            "latitude": {"$exists": True, "$ne": None},
+            "longitude": {"$exists": True, "$ne": None}
+        }
+        
+        if start_time is not None or end_time is not None:
+            match_conditions["time"] = {}
+            if start_time is not None:
+                match_conditions["time"]["$gte"] = int(start_time)
+            if end_time is not None:
+                match_conditions["time"]["$lte"] = int(end_time)
+        
+        if mag_min is not None or mag_max is not None:
+            match_conditions["magnitude"] = {}
+            if mag_min is not None:
+                match_conditions["magnitude"]["$gte"] = float(mag_min)
+            if mag_max is not None:
+                match_conditions["magnitude"]["$lte"] = float(mag_max)
+        
+        if depth_min is not None or depth_max is not None:
+            match_conditions["depth"] = {}
+            if depth_min is not None:
+                match_conditions["depth"]["$gte"] = float(depth_min)
+            if depth_max is not None:
+                match_conditions["depth"]["$lte"] = float(depth_max)
+
+        # Determine weight calculation
+        if weight_by == "count":
+            weight_expr = {"$sum": 1}
+        elif weight_by == "energy":
+            # Seismic energy is proportional to 10^(1.5*M), but we simplify to 10^M for visualization
+            weight_expr = {"$sum": {"$pow": [10, {"$divide": [{"$ifNull": ["$magnitude", 0]}, 2]}]}}
+        elif weight_by == "depth":
+            # Shallower earthquakes are more dangerous, so invert depth
+            # Weight = 1 / (depth + 1) to avoid division by zero
+            weight_expr = {"$sum": {"$divide": [1, {"$add": [{"$ifNull": ["$depth", 0]}, 1]}]}}
+        else:  # default: magnitude
+            weight_expr = {"$sum": {"$ifNull": ["$magnitude", 0]}}
+
         pipeline = [
-            {"$match": {"time": {"$gte": int(start_time), "$lte": int(end_time)}}},
+            {"$match": match_conditions},
             {
                 "$project": {
-                    "lat": {"$round": ["$latitude", 1]},
-                    "lon": {"$round": ["$longitude", 1]}
+                    "lat": {"$round": [{"$toDouble": "$latitude"}, 1]},
+                    "lon": {"$round": [{"$toDouble": "$longitude"}, 1]},
+                    "magnitude": {"$toDouble": "$magnitude"},
+                    "depth": {"$toDouble": "$depth"},
+                    "place": 1  # Include place for grouping
                 }
             },
             {
                 "$group": {
                     "_id": {"lat": "$lat", "lon": "$lon"},
-                    "intensity": {"$sum": 1}
+                    "weight": weight_expr,
+                    "count": {"$sum": 1},
+                    "avg_mag": {"$avg": "$magnitude"},
+                    "sample_place": {"$first": "$place"}  # Pick one representative place
                 }
             },
             {
@@ -135,11 +281,17 @@ class MongoHandler:
                     "_id": 0,
                     "lat": "$_id.lat",
                     "lon": "$_id.lon",
-                    "intensity": 1
+                    "weight": 1,
+                    "count": 1,
+                    "avg_mag": {"$round": [{"$ifNull": ["$avg_mag", 0]}, 1]},
+                    "region": "$sample_place"  # Include representative location
                 }
-            }
+            },
+            {"$sort": {"weight": -1}},
+            {"$limit": 500}  # Limit for performance
         ]
-        return await self.collection.aggregate(pipeline).to_list(length=None)
+        
+        return await self.collection.aggregate(pipeline).to_list(length=500)
 
     async def get_magnitude_distribution(self):
         """

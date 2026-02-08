@@ -1,4 +1,5 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Query
+from typing import Optional
 from contextlib import asynccontextmanager
 import asyncio
 import redis.asyncio as redis
@@ -8,7 +9,12 @@ from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 from db_mongo import mongo_handler
 from db_neo4j import neo4j_handler
+from db_neo4j import neo4j_handler
 from utils import MongoJSONEncoder
+from clustering import ClusteringEngine
+
+# Global Clustering Engine
+clustering_engine = ClusteringEngine()
 
 # Redis Subscriber Background Task
 async def redis_connector():
@@ -58,21 +64,68 @@ app.add_middleware(
 def read_root():
     return {"message": "Hello from Earthquake Monitor Backend!"}
 
+@app.get("/clusters")
+async def get_clusters():
+    """
+    Get all active clusters.
+    """
+    return await mongo_handler.get_clusters()
+
+@app.get("/clusters/{cluster_id}")
+async def get_cluster_detail(cluster_id: str):
+    """
+    Get details for a specific cluster.
+    """
+    # Direct query to clusters collection for now
+    col = mongo_handler.db["clusters"]
+    doc = await col.find_one({"cluster_id": cluster_id})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Cluster not found")
+    doc["_id"] = str(doc["_id"])
+    return doc
+
+@app.get("/clustering/config")
+async def get_clustering_config():
+    """
+    Get current clustering parameters.
+    """
+    return await clustering_engine.get_config()
+
+@app.post("/clustering/config")
+async def set_clustering_config(params: dict):
+    """
+    Update clustering parameters and trigger a re-run.
+    """
+    allowed = ["eps_km", "time_window_hours", "min_samples"]
+    new_config = {k: v for k, v in params.items() if k in allowed}
+    
+    # 1. Save to DB
+    await mongo_handler.set_clustering_config(new_config)
+    print(f"[API] Updated clustering config to: {new_config}")
+    
+    # 2. Trigger Re-clustering (Async)
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
+    await redis_client.publish("control_channel", "recluster")
+    await redis_client.aclose()
+    
+    return {"status": "updated", "config": new_config, "message": "Re-clustering triggered"}
+
 # Force reload for analytics routes - Attempt 2
 
 @app.get("/earthquakes")
 async def get_quakes(
-    mag_min: float = None, 
-    mag_max: float = None, 
-    start_time: int = None, 
-    end_time: int = None, 
-    depth_min: float = None,
-    depth_max: float = None,
-    north: float = None,
-    south: float = None,
-    east: float = None,
-    west: float = None,
-    limit: int = 50
+    mag_min: Optional[float] = Query(None), 
+    mag_max: Optional[float] = Query(None), 
+    start_time: Optional[int] = Query(None), 
+    end_time: Optional[int] = Query(None), 
+    depth_min: Optional[float] = Query(None),
+    depth_max: Optional[float] = Query(None),
+    north: Optional[float] = Query(None),
+    south: Optional[float] = Query(None),
+    east: Optional[float] = Query(None),
+    west: Optional[float] = Query(None),
+    cluster_id: Optional[str] = Query(None),
+    limit: int = Query(50)
 ):
     """
     Fetch filtered earthquakes.
@@ -84,15 +137,70 @@ async def get_quakes(
         north, south, east, west, 
         limit
     )
+    
+    # Filter by cluster_id if provided (could be moved to mongo_handler for efficiency)
+    if cluster_id:
+        quakes = [q for q in quakes if q.get("cluster_id") == cluster_id]
+        
     return quakes
 
 @app.get("/earthquakes/heatmap")
-async def get_heatmap(start_time: int, end_time: int):
+async def get_heatmap(
+    start_time: Optional[int] = Query(None),
+    end_time: Optional[int] = Query(None),
+    mag_min: Optional[float] = Query(None),
+    mag_max: Optional[float] = Query(None),
+    depth_min: Optional[float] = Query(None),
+    depth_max: Optional[float] = Query(None),
+    weight_by: str = Query("magnitude")  # "magnitude", "count", "energy", "depth"
+):
     """
     Returns heatmap data (intensity per grid point).
-    Range: start_time to end_time (required).
+    Supports filtering by time, magnitude, depth.
+    weight_by: how to calculate heat intensity
+      - "magnitude": sum of magnitudes (default)
+      - "count": number of events
+      - "energy": sum of 10^mag (seismic energy proxy)
+      - "depth": inverse depth weighted (shallower = hotter)
     """
-    return await mongo_handler.get_heatmap_data(start_time, end_time)
+    return await mongo_handler.get_heatmap_data(
+        start_time=start_time,
+        end_time=end_time,
+        mag_min=mag_min,
+        mag_max=mag_max,
+        depth_min=depth_min,
+        depth_max=depth_max,
+        weight_by=weight_by
+    )
+
+@app.get("/neo4j/graph")
+async def get_graph_data(
+    min_mag: float = 0, 
+    max_mag: float = 10, 
+    start_time: int = 0
+):
+    """
+    Fetch graph data for the map layer with filters.
+    """
+    return neo4j_handler.get_graph_data(
+        min_mag=min_mag, 
+        max_mag=max_mag, 
+        start_time=start_time
+    )
+
+@app.get("/neo4j/top-central")
+async def get_top_central_quakes(limit: int = Query(10)):
+    """
+    Get earthquakes with highest connectivity in the graph.
+    """
+    return neo4j_handler.get_top_central_quakes(limit=limit)
+
+@app.get("/neo4j/neighbors/{node_id}")
+async def get_node_neighbors(node_id: str):
+    """
+    Get immediate neighbors for a specific node to show in details view.
+    """
+    return neo4j_handler.get_node_neighbors(node_id)
 
 @app.get("/earthquakes/latest")
 async def get_latest_earthquakes(limit: int = 50):
