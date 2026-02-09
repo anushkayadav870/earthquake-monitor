@@ -1,6 +1,9 @@
 from neo4j import GraphDatabase
 from config import NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
 import math
+import json
+import os
+import httpx
 
 class Neo4jHandler:
     def __init__(self):
@@ -8,7 +11,33 @@ class Neo4jHandler:
             NEO4J_URI, 
             auth=(NEO4J_USER, NEO4J_PASSWORD)
         )
+        self._load_rules()
         self.seed_faults()
+
+    def _load_rules(self):
+        """Load Neo4j rules from config file."""
+        rules_path = os.path.join(os.path.dirname(__file__), "neo4j_rules.json")
+        try:
+            with open(rules_path, "r") as f:
+                self.rules = json.load(f)
+        except Exception as e:
+            print(f"Warning: Could not load neo4j_rules.json, using defaults. Error: {e}")
+            self.rules = {
+                "impact_rules": [],
+                "default_impact_radius": 10,
+                "fault_zone_distance_limit_km": 200,
+                "aftershock_rules": {"min_main_mag": 5.0, "max_dist_km": 50, "max_days_diff": 7},
+                "cascade_rules": {"min_other_mag": 4.0, "max_dist_km": 200, "max_hours_diff": 48}
+            }
+
+    def compute_impact_radius(self, mag):
+        """
+        Dynamically compute impact radius based on magnitude rules.
+        """
+        for rule in self.rules.get("impact_rules", []):
+            if rule["min"] <= mag < rule["max"]:
+                return rule["radius_km"]
+        return self.rules.get("default_impact_radius", 10)
 
     def close(self):
         self.driver.close()
@@ -38,6 +67,61 @@ class Neo4jHandler:
         except Exception as e:
             print(f"Error seeding faults: {e}")
 
+    def ingest_faults_from_geojson(self, geojson_url):
+        """
+        Fetches fault data from a GeoJSON URL and ingests it into Neo4j.
+        Calculates a simple centroid for the fault lines to store as Point location.
+        """
+        try:
+            with httpx.Client() as client:
+                res = client.get(geojson_url)
+                res.raise_for_status()
+                data = res.json()
+
+            faults = []
+            for f in data.get("features", []):
+                name = f["properties"].get("name") or f["properties"].get("Name") or "Unknown Fault"
+                geom = f.get("geometry", {})
+                
+                if geom.get("type") == "LineString":
+                    coords = geom["coordinates"]
+                elif geom.get("type") == "MultiLineString":
+                    # Flatten coordinates for MultiLineString
+                    coords = [pt for line in geom["coordinates"] for pt in line]
+                else:
+                    continue
+
+                if not coords: continue
+
+                # Use centroid of fault line
+                lons = [c[0] for c in coords]
+                lats = [c[1] for c in coords]
+                lon = sum(lons)/len(lons)
+                lat = sum(lats)/len(lats)
+
+                faults.append({
+                    "name": name,
+                    "lat": lat,
+                    "lon": lon
+                })
+
+            if not faults:
+                print("No faults found in GeoJSON.")
+                return
+
+            query = """
+            UNWIND $faults AS f
+            MERGE (fz:FaultZone {name: f.name})
+            SET fz.location = point({latitude: f.lat, longitude: f.lon})
+            """
+
+            with self.driver.session() as session:
+                session.run(query, faults=faults)
+                print(f"Successfully ingested {len(faults)} faults from GeoJSON.")
+                
+        except Exception as e:
+            print(f"Error ingesting faults from GeoJSON: {e}")
+
     def insert_earthquake(self, data):
         """
         1. Create Earthquake & detailed Location Hierarchy (City, Region).
@@ -49,13 +133,10 @@ class Neo4jHandler:
             place = data.get("place", "Unknown")
             region_name, city_name = self._extract_location_details(place)
             
-            # Impact Radius Calculation: R = 10^(0.5*M - 1.8) approx, or simplified:
-            # Let's use specific rule: M2=5km, M4=20km, M6=100km, M8=500km
+            # Impact Radius Calculation: Rule-based
             mag = float(data.get("magnitude", 0) or 0)
-            if mag < 2: impact_km = 5
-            elif mag < 4: impact_km = 20
-            elif mag < 6: impact_km = 100
-            else: impact_km = 500
+            impact_km = self.compute_impact_radius(mag)
+            fault_limit_m = self.rules.get("fault_zone_distance_limit_km", 200) * 1000
             
             session.run(
                 """
@@ -79,10 +160,10 @@ class Neo4jHandler:
                 MERGE (e)-[:OCCURRED_NEAR]->(c)
                 MERGE (e)-[:OCCURRED_IN]->(r)
                 
-                // Link to Fault Zone (if within 200km of our mock points)
-                WITH e, c
+                // Link to Fault Zone (Rule-based distance)
+                WITH e, c, $fault_limit AS fault_limit
                 MATCH (fz:FaultZone)
-                WHERE point.distance(e.location, fz.location) < 200000 
+                WHERE point.distance(e.location, fz.location) < fault_limit 
                 MERGE (e)-[:ON_FAULTLINE]->(fz)
                 
                 // Link to Affected Cities (Impact Radius)
@@ -102,7 +183,8 @@ class Neo4jHandler:
                 exact_address=data.get("exact_address", "Unknown"),
                 lat=data["latitude"],
                 lon=data["longitude"],
-                impact_km=impact_km
+                impact_km=impact_km,
+                fault_limit=fault_limit_m
             )
 
             # Link to Cluster if present
@@ -211,19 +293,20 @@ class Neo4jHandler:
         """
         Connects this earthquake to a 'Main Shock' (AFTERSHOCK_OF) or 'Future Shock' (FORESHOCK_OF).
         """
+        rules = self.rules.get("aftershock_rules", {})
         query = """
         MATCH (new:Earthquake {id: $id})
         MATCH (other:Earthquake)
         WHERE other.id <> new.id
-        AND other.mag >= 5.0
+        AND other.mag >= $min_mag
         AND new.location IS NOT NULL AND other.location IS NOT NULL
         
         WITH new, other, 
              point.distance(new.location, other.location) / 1000 AS dist_km,
              (toInteger(new.time) - toInteger(other.time)) / (1000 * 60 * 60 * 24.0) AS days_diff
              
-        WHERE dist_km < 50 
-        AND abs(days_diff) <= 7 
+        WHERE dist_km <= $max_dist 
+        AND abs(days_diff) <= $max_days 
         
         // Determine relationship type dynamically
         FOREACH (_ IN CASE WHEN days_diff > 0 THEN [1] ELSE [] END |
@@ -236,7 +319,11 @@ class Neo4jHandler:
         )
         """
         try:
-            session.run(query, id=data["id"])
+            session.run(query, 
+                        id=data["id"], 
+                        min_mag=rules.get("min_main_mag", 5.0),
+                        max_dist=rules.get("max_dist_km", 50),
+                        max_days=rules.get("max_days_diff", 7))
         except Exception as e:
             print(f"Error linking related events: {e}")
 
@@ -244,18 +331,19 @@ class Neo4jHandler:
         """
         Detects potential TRIGGERED events across different fault zones.
         """
+        rules = self.rules.get("cascade_rules", {})
         query = """
         MATCH (new:Earthquake {id: $id})-[:ON_FAULTLINE]->(fz1:FaultZone)
         MATCH (other:Earthquake)-[:ON_FAULTLINE]->(fz2:FaultZone)
         WHERE fz1 <> fz2 
         AND other.id <> new.id
-        AND other.mag >= 4.0
+        AND other.mag >= $min_mag
         
         WITH new, other, fz1, fz2,
              point.distance(new.location, other.location) / 1000 AS dist_km,
              abs(toInteger(new.time) - toInteger(other.time)) / (1000 * 60 * 60.0) AS hours_diff
              
-        WHERE dist_km < 200 AND hours_diff < 48
+        WHERE dist_km <= $max_dist AND hours_diff <= $max_hours
         MERGE (other)-[r:TRIGGERED]->(new)
         SET r.distance_km = dist_km,
             r.hours_diff = hours_diff,
@@ -264,7 +352,11 @@ class Neo4jHandler:
         """
         try:
             with self.driver.session() as session:
-                session.run(query, id=data["id"])
+                session.run(query, 
+                            id=data["id"],
+                            min_mag=rules.get("min_other_mag", 4.0),
+                            max_dist=rules.get("max_dist_km", 200),
+                            max_hours=rules.get("max_hours_diff", 48))
         except Exception as e:
             print(f"Error detecting cascades: {e}")
 
@@ -295,8 +387,40 @@ class Neo4jHandler:
             print(f"Error fetching Neo4j context: {e}")
             return {}
 
+    def get_aftershock_sequences(self, limit=50):
+        """
+        Retrieves earthquakes linked by AFTERSHOCK_OF relationships.
+        """
         query = """
-        MATCH (trigger:Earthquake)-[r:POSSIBLE_TRIGGERED_EVENT]->(triggered:Earthquake)
+        MATCH (after:Earthquake)-[r:AFTERSHOCK_OF]->(main:Earthquake)
+        RETURN after, r, main
+        ORDER BY after.time DESC
+        LIMIT $limit
+        """
+        try:
+            with self.driver.session() as session:
+                result = session.run(query, limit=limit)
+                sequences = []
+                for record in result:
+                    after = dict(record["after"])
+                    main = dict(record["main"])
+                    rel = dict(record["r"])
+                    sequences.append({
+                        "main_shock": main,
+                        "aftershock": after,
+                        "details": rel
+                    })
+                return sequences
+        except Exception as e:
+            print(f"Error fetching aftershock sequences: {e}")
+            return []
+
+    def get_cascade_events(self, limit=50):
+        """
+        Retrieves earthquakes linked by TRIGGERED relationships.
+        """
+        query = """
+        MATCH (trigger:Earthquake)-[r:TRIGGERED]->(triggered:Earthquake)
         RETURN trigger, r, triggered
         ORDER BY triggered.time DESC
         LIMIT $limit
@@ -316,7 +440,7 @@ class Neo4jHandler:
                     })
                 return cascades
         except Exception as e:
-            print(f"Error fetching cascades: {e}")
+            print(f"Error fetching cascade events: {e}")
             return []
 
 
@@ -504,7 +628,6 @@ class Neo4jHandler:
                         }
                     })
                     
-                return {"center": center_node, "neighbors": neighbors}
         except Exception as e:
             print(f"Error fetching node neighbors: {e}")
             return {"center": None, "neighbors": []}

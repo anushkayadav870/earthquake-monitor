@@ -62,13 +62,6 @@ services:
       - ./backend:/app
     restart: on-failure
 
-  # 6. Frontend (Vite/React/Vue)
-  frontend:
-    build: ./frontend
-    container_name: eq_frontend
-    ports:
-      - "5173:5173"
-    restart: always
 
   # New Next.js frontend (development)
   frontend_next:

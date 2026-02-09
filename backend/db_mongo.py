@@ -55,8 +55,6 @@ class MongoHandler:
                 {"$set": mongo_data},
                 upsert=True
             )
-            # if result.upserted_id:
-            #    print(f"[Mongo] Inserted: {data['id']}")
             
         except Exception as e:
             print(f"[Mongo] Error inserting earthquake {data.get('id')}: {e}")
@@ -149,6 +147,20 @@ class MongoHandler:
             {"$set": params},
             upsert=True
         )
+
+    async def watch_config_changes(self, callback):
+        """
+        Watch for changes in the config collection and trigger re-clustering.
+        """
+        config_collection = self.db["config"]
+        pipeline = [
+            {"$match": {"operationType": {"$in": ["insert", "update", "replace"]}, "documentKey._id": "clustering_params"}}
+        ]
+        async with config_collection.watch(pipeline) as stream:
+            print("[MongoDB] Configuration watcher started.")
+            async for change in stream:
+                print(f"[MongoDB] Config change detected: {change['operationType']}")
+                await callback()
 
     async def get_earthquakes(self, mag_min=None, mag_max=None, start_time=None, end_time=None, 
                               depth_min=None, depth_max=None, 

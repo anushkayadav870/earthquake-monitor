@@ -33,16 +33,14 @@ async def process_message(redis_client, message_id, data):
 
         # Pass data directly to Mongo handler
         await mongo_handler.insert_earthquake(data)
+        print(f"[Worker] Live Ingestion: Synced to MongoDB (Enriched: {bool(exact_address)})")
         
         # Ingest into Neo4j
         try:
             neo4j_handler.insert_earthquake(data)
-            print(f"[Neo4j] Inserted/Updated earthquake: {data['id']}")
+            print(f"[Worker] Live Ingestion: Synced to Neo4j (Event: {data['id']})")
         except Exception as e:
-            print(f"[Neo4j] Error inserting into Neo4j: {e}")
-            # We don't necessarily want to fail the whole process if only Neo4j fails,
-            # but for a "fault-tolerant" system, maybe we should? 
-            # Let's let it retry if critical databases fail.
+            print(f"[Neo4j] Error during live ingestion: {e}")
         
         # Acknowledge SUCCESS
         await redis_client.xack(STREAM_KEY, CONSUMER_GROUP, message_id)
@@ -110,29 +108,35 @@ async def run_consumer_loop():
             print(f"Consumer loop error: {e}")
             await asyncio.sleep(5)
 
-async def run_clustering_listener():
-    print("Starting Clustering Listener...")
-    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-    pubsub = redis_client.pubsub()
-    await pubsub.subscribe("control_channel")
+async def run_clustering_watcher():
+    print("Starting MongoDB Config Clustering Watcher...")
     
     clustering_engine = ClusteringEngine()
+    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
     
     # Run once on startup to ensure clusters are fresh
     await clustering_engine.run_clustering()
     
+    async def on_config_change():
+        config = await clustering_engine.get_config()
+        print(f"[Worker] CONFIG CHANGE triggering re-clustering. Using Config: {config}")
+        count = await clustering_engine.run_clustering()
+        print(f"[Worker] Re-clustering complete. Found {count} clusters.")
+        
+        # Notify UI via Redis Pub/Sub (which main.py listens to)
+        notification = {
+            "type": "CLUSTERING_UPDATED",
+            "count": count,
+            "timestamp": int(asyncio.get_event_loop().time() * 1000)
+        }
+        await redis_client.publish("live_feed", json.dumps(notification))
+        print("[Worker] UI Notification sent.")
+
     try:
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                data = message["data"]
-                if data == "recluster":
-                    # Fetch latest config to log what we are using
-                    config = await clustering_engine.get_config()
-                    print(f"[Worker] RECEIVED recluster command. Using Config: {config}")
-                    count = await clustering_engine.run_clustering()
-                    print(f"[Worker] Re-clustering complete. Found {count} clusters.")
+        # Watch MongoDB change stream
+        await mongo_handler.watch_config_changes(on_config_change)
     except Exception as e:
-        print(f"Clustering listener error: {e}")
+        print(f"Clustering watcher error: {e}")
     finally:
         await redis_client.aclose()
 
@@ -144,7 +148,7 @@ async def main():
     await asyncio.gather(
         run_producer_loop(),
         run_consumer_loop(),
-        run_clustering_listener()
+        run_clustering_watcher()
     )
 
 if __name__ == "__main__":

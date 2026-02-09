@@ -9,7 +9,6 @@ from config import REDIS_URL, LIVE_CHANNEL, ALERT_CHANNEL
 from socket_manager import manager
 from db_mongo import mongo_handler
 from db_neo4j import neo4j_handler
-from db_neo4j import neo4j_handler
 from utils import MongoJSONEncoder
 from clustering import ClusteringEngine
 
@@ -94,21 +93,16 @@ async def get_clustering_config():
 @app.post("/clustering/config")
 async def set_clustering_config(params: dict):
     """
-    Update clustering parameters and trigger a re-run.
+    Update clustering parameters. The worker will detect this via MongoDB Change Stream.
     """
     allowed = ["eps_km", "time_window_hours", "min_samples"]
     new_config = {k: v for k, v in params.items() if k in allowed}
     
-    # 1. Save to DB
+    # 1. Save to DB (This triggers the watcher in worker.py)
     await mongo_handler.set_clustering_config(new_config)
     print(f"[API] Updated clustering config to: {new_config}")
     
-    # 2. Trigger Re-clustering (Async)
-    redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-    await redis_client.publish("control_channel", "recluster")
-    await redis_client.aclose()
-    
-    return {"status": "updated", "config": new_config, "message": "Re-clustering triggered"}
+    return {"status": "updated", "config": new_config, "message": "Clustering config saved. Watcher will trigger re-clustering."}
 
 # Force reload for analytics routes - Attempt 2
 
@@ -396,9 +390,6 @@ async def get_cascades(limit: int = 50):
     await redis_client.set(cache_key, json.dumps(data, cls=MongoJSONEncoder), ex=600)
     await redis_client.aclose()
     return data
-
-
-
 
 @app.get("/earthquakes/{event_id}")
 async def get_earthquake_detail(event_id: str):

@@ -61,8 +61,6 @@ class ClusteringEngine:
         coords = df[["latitude", "longitude", "time", "magnitude", "depth"]].copy()
         
         # 1. Convert Time to Hours relative to min time
-        
-        # 1. Convert Time to Hours relative to min time
         min_time = coords["time"].min()
         coords["hours_rel"] = (coords["time"] - min_time) / (1000 * 3600) # ms -> hours
         
