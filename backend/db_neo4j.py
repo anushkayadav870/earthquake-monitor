@@ -631,5 +631,7 @@ class Neo4jHandler:
         except Exception as e:
             print(f"Error fetching node neighbors: {e}")
             return {"center": None, "neighbors": []}
+            
+        return {"center": center_node, "neighbors": neighbors}
 
 neo4j_handler = Neo4jHandler()
