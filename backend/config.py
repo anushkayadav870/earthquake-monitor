@@ -7,15 +7,37 @@ USGS_API_URL = "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_ho
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379")
 STREAM_KEY = "earthquake_stream"
 LIVE_CHANNEL = "live_earthquakes"
+EVENT_BUFFER_KEY = "recent_events"
+BUFFER_SIZE = 500
 
 # MongoDB Configuration
 MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME", "earthquake_db")
 
 # Neo4j Configuration
-NEO4J_URI = os.getenv("NEO4J_URI", "bolt://neo4j:7687")
+NEO4J_URI = os.getenv("NEO4J_URI", "bolt://localhost:7687")
 NEO4J_USER = os.getenv("NEO4J_USER", "neo4j")
 NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD", "test1234")
 
 # Worker Settings
 FETCH_INTERVAL = 30  # seconds
+
+# Alert Configuration
+ALERT_THRESHOLD = 5.0  # Global high-priority alert
+REGIONAL_ALERT_THRESHOLD = 3.5  # Lower threshold for high-risk zones
+ALERT_CHANNEL = "verified_alerts"
+HIGH_RISK_REGIONS = ["California", "CA", "Alaska", "AK", "Japan", "Mexico", "Turkey", "Indonesia", "Chile"]
+
+# Clustering Configuration (Defaults)
+# These can be overridden by Environment Variables or at runtime via API/DB
+CLUSTERING_DISTANCE_KM = float(os.getenv("CLUSTERING_DISTANCE_KM", 50))
+CLUSTERING_TIME_WINDOW_HOURS = float(os.getenv("CLUSTERING_TIME_WINDOW_HOURS", 48))
+CLUSTERING_MIN_SAMPLES = int(os.getenv("CLUSTERING_MIN_SAMPLES", 3))
+
+# --- LOCAL DEV OVERRIDE ---
+# NOTE: Removed automatic overrides that replaced Docker service hostnames with
+# `localhost` inside the container. Those overrides caused the app to attempt
+# connecting to `localhost` (which refers to the container itself) and fail to
+# reach the actual services running in other containers. If you need different
+# host settings for local development, set the environment variables explicitly
+# in the `.env` file (e.g., MONGO_URI, NEO4J_URI, REDIS_URL).

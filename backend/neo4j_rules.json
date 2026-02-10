@@ -1,0 +1,36 @@
+{
+    "impact_rules": [
+        {
+            "min": 0,
+            "max": 2,
+            "radius_km": 5
+        },
+        {
+            "min": 2,
+            "max": 4,
+            "radius_km": 20
+        },
+        {
+            "min": 4,
+            "max": 6,
+            "radius_km": 100
+        },
+        {
+            "min": 6,
+            "max": 10,
+            "radius_km": 500
+        }
+    ],
+    "default_impact_radius": 10,
+    "fault_zone_distance_limit_km": 200,
+    "aftershock_rules": {
+        "min_main_mag": 5.0,
+        "max_dist_km": 50,
+        "max_days_diff": 7
+    },
+    "cascade_rules": {
+        "min_other_mag": 4.0,
+        "max_dist_km": 200,
+        "max_hours_diff": 48
+    }
+}

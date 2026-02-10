@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+
+# Environment files
+.env
+.env.*
+
+# Node
+node_modules/
+
+# Next.js
+.next/
+out/
+.turbo/
+.vercel/
+
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+env/
+venv/
+ENV/

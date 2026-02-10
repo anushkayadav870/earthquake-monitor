@@ -2,7 +2,7 @@ import asyncio
 import httpx
 import json
 import redis.asyncio as redis
-from config import USGS_API_URL, REDIS_URL, STREAM_KEY, LIVE_CHANNEL, FETCH_INTERVAL
+from config import USGS_API_URL, REDIS_URL, STREAM_KEY, LIVE_CHANNEL, FETCH_INTERVAL, ALERT_THRESHOLD, ALERT_CHANNEL
 
 async def fetch_earthquakes():
     """Fetch earthquake data from USGS API."""
@@ -30,35 +30,63 @@ async def push_to_redis(redis_client, data):
         properties = feature["properties"]
         geometry = feature["geometry"]
 
+        magnitude = float(properties.get("mag") or 0.0)
+        place = str(properties.get("place") or "Unknown")
+        timestamp = int(properties.get("time") or 0)
+
         event_data = {
             "id": str(event_id),
-            "magnitude": str(properties.get("mag") or 0.0),
-            "place": str(properties.get("place") or "Unknown"),
-            "time": str(properties.get("time") or ""),
+            "magnitude": str(magnitude),
+            "place": place,
+            "time": str(timestamp),
             "url": str(properties.get("url") or ""),
             "longitude": str(geometry["coordinates"][0]),
             "latitude": str(geometry["coordinates"][1]),
             "depth": str(geometry["coordinates"][2]),
-            "raw_json": json.dumps(feature) # Store full raw data just in case
+            "raw_json": json.dumps(feature) # Store full raw data
         }
 
-        # Check if event needs processing? 
-        # For now, we push everything. Consumers can handle deduplication.
-        # Ideally, we could check if ID exists in a set, but let's keep it simple first.
-        
         try:
-            # XADD: Appends to stream. ID='*' means auto-generate ID.
+            # 1. DEDUPLICATION
+            dedup_key = f"processed:{event_id}"
+            is_new = await redis_client.set(dedup_key, "1", nx=True, ex=86400)
+            
+            if not is_new:
+                continue
+            
+            # 2. REDIS BUFFER (Phase 2.4 - Time-lapse/Playback support)
+            # Use ZSET with timestamp as score for fast range queries
+            from config import EVENT_BUFFER_KEY, BUFFER_SIZE
+            await redis_client.zadd(EVENT_BUFFER_KEY, {json.dumps(event_data): timestamp})
+            # Keep buffer size limited
+            await redis_client.zremrangebyrank(EVENT_BUFFER_KEY, 0, -(BUFFER_SIZE + 1))
+
+            # 3. ENHANCED ALERTS (Phase 1.2 - Regional rules)
+            from config import ALERT_THRESHOLD, REGIONAL_ALERT_THRESHOLD, HIGH_RISK_REGIONS, ALERT_CHANNEL
+            
+            is_high_risk_region = any(region in place for region in HIGH_RISK_REGIONS)
+            threshold = REGIONAL_ALERT_THRESHOLD if is_high_risk_region else ALERT_THRESHOLD
+
+            if magnitude >= threshold:
+                event_data["is_alert"] = "true" 
+                alert_payload = {
+                    "event": event_data,
+                    "message": f"{'REGIONAL ' if is_high_risk_region else ''}ALERT: Magnitude {magnitude} earthquake detected near {place}"
+                }
+                await redis_client.publish(ALERT_CHANNEL, json.dumps(alert_payload))
+                print(f"*** TRIGGERED ALERT FOR EVENT {event_id} (Mag {magnitude}) ***")
+
+            # XADD: Appends to stream for worker processing
             await redis_client.xadd(STREAM_KEY, event_data)
             
             # PUBLISH: Broadcast to real-time subscribers
-            # We publish the raw JSON so the websocket can just forward it
             await redis_client.publish(LIVE_CHANNEL, event_data["raw_json"])
             
             count += 1
         except Exception as e:
             print(f"Error pushing to Redis: {e}")
 
-    print(f"Pushed {count} events to Redis Stream '{STREAM_KEY}'.")
+    print(f"Pushed {count} events to Redis Stream '{STREAM_KEY}' and Buffer.")
 
 async def main():
     print(f"Starting Earthquake Producer...")

@@ -62,13 +62,24 @@ services:
       - ./backend:/app
     restart: on-failure
 
-  # 6. Frontend (Vite/React/Vue)
-  frontend:
-    build: ./frontend
-    container_name: eq_frontend
+
+  # New Next.js frontend (development)
+  frontend_next:
+    build: ./frontend-next
+    container_name: eq_frontend_next
     ports:
-      - "5173:5173"
-    restart: always
+      - "3000:3000"
+    depends_on:
+      - backend
+    environment:
+      # Use host-accessible URLs because client-side fetches/WebSocket
+      # are executed by the browser (not inside the container).
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws
+    volumes:
+      - ./frontend-next:/app
+      - /app/node_modules
+    restart: on-failure
 
 volumes:
   mongo_data:

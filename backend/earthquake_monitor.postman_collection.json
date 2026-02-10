@@ -1,0 +1,118 @@
+{
+    "info": {
+        "_postman_id": "e4r7q3u1-2k0d-4m87-9j3l-1p5s8d6a4c22",
+        "name": "Earthquake Monitor API",
+        "description": "API Tests for Phase 1-5 Features (Filters, Heatmaps, Analytics, Graph)",
+        "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+    },
+    "item": [
+        {
+            "name": "Phase 1: Core",
+            "item": [
+                {
+                    "name": "Live Feed (All)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes?limit=10"
+                    }
+                },
+                {
+                    "name": "Filter: Mag > 4.0",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes?mag_min=4.0"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Phase 2: Visuals",
+            "item": [
+                {
+                    "name": "Heatmap Grid",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes/heatmap?start_time=0&end_time=9999999999999"
+                    }
+                },
+                {
+                    "name": "Filter: Deep (>30km)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes?depth_min=30"
+                    }
+                },
+                {
+                    "name": "Filter: California Box",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes?north=42&south=32&east=-114&west=-125"
+                    }
+                },
+                {
+                    "name": "Detail + Context (Replace ID)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/earthquakes/tx2026cileef"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Phase 3: Analytics",
+            "item": [
+                {
+                    "name": "Mag Distribution",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/analytics/magnitude-distribution"
+                    }
+                },
+                {
+                    "name": "Mag Trends (Daily)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/analytics/magnitude-trends"
+                    }
+                },
+                {
+                    "name": "Depth vs Mag (Scatter)",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/analytics/depth-vs-magnitude"
+                    }
+                }
+            ]
+        },
+        {
+            "name": "Phase 5: Risks",
+            "item": [
+                {
+                    "name": "Regional Risk Scores",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/analytics/risk-scores"
+                    }
+                },
+                {
+                    "name": "Unusual Activity",
+                    "request": {
+                        "method": "GET",
+                        "header": [],
+                        "url": "http://localhost:8000/analytics/unusual-activity"
+                    }
+                }
+            ]
+        }
+    ]
+}

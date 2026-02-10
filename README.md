@@ -1,69 +1,104 @@
-# Earthquake Monitor System
+# Real-Time Earthquake Monitoring System
 
-A real-time earthquake monitoring system using microservices architecture.
+An advanced, distributed software platform designed for high-velocity seismic data ingestion, enrichment, and analytical visualization. This project demonstrates a **Polyglot Persistence** architecture, utilizing specialized database engines to solve distinct data challenges: real-time streaming, geospatial indexing, and graph-based relationship modeling.
 
-## Tech Stack
-- **Frontend**: Vite + Vue/React (Port 5173)
-- **Backend**: Python FastAPI (Port 8000)
-- **Database 1**: MongoDB (Port 27017) - Primary storage
-- **Database 2**: Neo4j (Port 7474/7687) - Graph relationships (Faults/Regions)
-- **Message Broker**: Redis (Port 6379) - Stream processing
+---
 
-## Prerequisites
-1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) (must be installed and running)
-2. Git
+## 🏗️ System Architecture
 
-## How to Run on a New Machine
+The application is built on a microservice-oriented architecture, containerized with Docker for seamless orchestration.
 
-### 1. Clone the Repository
-```bash
-git clone <your-repo-url>
-cd earthquake-monitor
-```
+### Polyglot Persistence Layer
+- **Redis (Speed)**: Manages the high-frequency event stream and provides a low-latency pub/sub channel for real-time dashboard updates.
+- **MongoDB (Geospatial Document Store)**: Acts as the primary historical archive. Leverages `2dsphere` indexing for efficient spatio-temporal queries and heatmap generation.
+- **Neo4j (Graph Logic)**: Maps complex seismic relationships, including aftershock sequences, cascade events, and spatial proximity to fault lines and urban centers.
 
-### 2. Configure Environment
-Ensure the `.env` file exists in the root directory. If not, create one with the following content:
+### Data Flow
+1. **Ingestion**: The **Producer** fetches data from the USGS API every 30-60 seconds and publishes to a Redis Stream.
+2. **Processing**: The **Async Worker** consumes the stream, resolves coordinates into human-readable addresses via reverse geocoding, and performs parallel writes to MongoDB and Neo4j.
+3. **Delivery**: The **FastAPI Backend** serves as the gateway, providing RESTful endpoints and WebSocket connections for the **Next.js** frontend.
 
-```env
-# MongoDB Config
-MONGO_URI=mongodb://mongo:27017/earthquake_db
-MONGO_DB_NAME=earthquake_db
+---
 
-# Redis Config
-REDIS_HOST=redis
-REDIS_PORT=6379
-REDIS_URL=redis://redis:6379
+## 🌟 Key Features
 
-# Neo4j Config
-NEO4J_URI=bolt://neo4j:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=test1234  # Must be at least 8 chars
+### 📡 Real-Time Intelligence
+- **Live Ingestion**: Continuous monitoring of global seismic activity with automated deduplication and regional threshold alerting.
+- **Reverse Geocoding**: Automated enrichment of raw coordinates into precise location addresses.
 
-# App Config
-DEBUG=True
-```
+### 📊 Advanced Analytics
+- **Spatio-Temporal Clustering**: Uses the DBSCAN algorithm to detect "seismic swarms" and group events by density.
+- **Risk Assessment**: Dynamic scoring system for geographical regions based on historical frequency and magnitude intensity.
+- **Trend Analysis**: Statistical distribution of magnitudes and daily occurrence trends.
 
-### 3. Start the System
-Run the following command to build and start all containers:
+### 🕸️ Graph-Based Relationship Detection
+- **Seismic Chains**: Automated detection of Aftershocks and Foreshocks based on time/distance decay rules.
+- **Inter-Fault Triggering**: Identifies cascade events where activity on one fault zone correlates with stress transfer to another.
 
-```bash
-docker-compose up --build
-```
-*Note: The `--build` flag is important the first time to ensure all Python dependencies (like `neo4j` driver) are installed.*
+---
 
-### 4. Access the Services
-- **Web App**: [http://localhost:5173](http://localhost:5173)
-- **API Docs**: [http://localhost:8000/docs](http://localhost:8000/docs)
-- **Neo4j Browser**: [http://localhost:7474](http://localhost:7474)
-    - User: `neo4j`
-    - Pass: `test1234`
-- **MongoDB**: Connect via `mongodb://localhost:27017`
+## 🛠️ Technology Stack
 
-## Troubleshooting
-- **Neo4j Access**: If you see "WebSocket connection failure", ensure the password is at least 8 characters.
-- **Connection Refused**: Ensure Docker Desktop is running (`docker ps`).
-- **Volume Errors**: If Neo4j fails to start due to "UnsupportedLogVersion", run:
-  ```bash
-  docker-compose down -v
-  docker-compose up --build
-  ```
+| Layer | Technology |
+| :--- | :--- |
+| **Language** | Python 3.9+, TypeScript |
+| **Backend Framework** | FastAPI |
+| **Frontend Framework** | Next.js, Leaflet.js |
+| **Databases** | Redis, MongoDB, Neo4j |
+| **Orchestration** | Docker, Docker Compose |
+
+---
+
+## 🚀 Installation & Setup
+
+### Prerequisites
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Node.js (Optional, for manual frontend development)
+- Python 3.9+ (Optional, for manual backend development)
+
+### Quick Start with Docker
+1. Clone the repository and navigate to the project root.
+2. Build and start the entire stack:
+   ```bash
+   docker-compose up --build
+   ```
+3. The system will automatically provision the databases, start the ingestion services, and launch the web interface.
+
+---
+
+## 📍 Access Ports
+
+| Service | URL |
+| :--- | :--- |
+| **API Documentation (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| **Neo4j Browser** | [http://localhost:7474](http://localhost:7474) (Login: `neo4j` / Pass: `test1234`) |
+
+---
+
+## 📐 technical Specifications
+
+### Data Flow Model
+The following diagram illustrates the lifecycle of a seismic event, from edge ingestion to persistent storage and real-time broadcast.
+
+![Data Flow Diagram](docs/data_flow.png)
+
+### Logical Entity-Relationship Model
+The schema is designed for high-performance retrieval of both spatial attributes and graph-based seismic relationships.
+
+![ER Diagram](docs/er_diagram.png)
+
+---
+
+## 📚 API Endpoints (Highlights)
+
+- `GET /earthquakes/latest`: Retrieves newest events from the Redis buffer.
+- `GET /earthquakes/heatmap`: Aggregated density data for map visualization.
+- `GET /analytics/risk-scores`: Calculated safety metrics per region.
+- `GET /analytics/aftershocks`: Graph-traversed seismic sequence pairs.
+
+---
+
+## 📜 Academic References
+- *Designing Data-Intensive Applications* (Kleppmann, 2017)
+- *Graph Databases in Practice* (Robinson et al., 2015)
+- *USGS Earthquake Hazards Program* (Data Source)
