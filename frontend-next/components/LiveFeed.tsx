@@ -56,6 +56,7 @@ export default function LiveFeed() {
         <div className="text-sm text-slate-500">No events yet</div>
       ) : (
         <ul className="space-y-3">
+<<<<<<< HEAD
             {events.map((ev, idx) => (
               <li
                 key={ev.id || idx}
@@ -75,6 +76,19 @@ export default function LiveFeed() {
                 )}
               </li>
             ))}
+=======
+          {events.map((e, idx) => (
+            <li key={e.id || idx} className="flex justify-between items-start">
+              <div>
+                <div className="text-sm font-medium">{e.place || 'Unknown location'}</div>
+                <div className="text-xs text-slate-500">{fmtTime(e.time)}</div>
+              </div>
+              <div className="ml-4 text-right">
+                <div className="text-lg font-semibold">{e.magnitude ?? '-'}</div>
+              </div>
+            </li>
+          ))}
+>>>>>>> ff17395 (1)
         </ul>
       )}
     </div>

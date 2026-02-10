@@ -1,13 +1,19 @@
+<<<<<<< HEAD
 "use client"
 
 import { useEffect, useState } from 'react'
 import dynamic from 'next/dynamic'
 import DashboardLayout from '../components/DashboardLayout'
 import { MapFilters } from '../components/FilterPanel'
+=======
+import dynamic from 'next/dynamic'
+import LiveFeed from '../components/LiveFeed'
+>>>>>>> ff17395 (1)
 
 // Dynamic import to avoid Leaflet SSR issues
 const EarthquakeMap = dynamic(() => import('../components/EarthquakeMap'), {
   ssr: false,
+<<<<<<< HEAD
   loading: () => <div className="w-full h-full bg-slate-900 flex items-center justify-center text-slate-500">Loading Map Engine...</div>,
 })
 
@@ -63,5 +69,28 @@ export default function Home() {
         selectedEventId={selectedEvent?.id}
       />
     </DashboardLayout>
+=======
+  loading: () => <div className="w-full h-96 bg-slate-100 rounded-lg animate-pulse" />,
+})
+
+export default function Home() {
+  return (
+    <div className="space-y-6">
+      <header className="mb-6">
+        <h1 className="text-4xl font-bold">🌍 Earthquake Monitor</h1>
+        <p className="text-slate-600 text-lg">Real-time seismic events and analytics</p>
+      </header>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-3">Map</h2>
+        <EarthquakeMap />
+      </section>
+
+      <section>
+        <h2 className="text-2xl font-semibold mb-3">Live Feed</h2>
+        <LiveFeed />
+      </section>
+    </div>
+>>>>>>> ff17395 (1)
   )
 }

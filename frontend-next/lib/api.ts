@@ -5,8 +5,11 @@ export async function fetchEarthquakes(params?: {
   mag_max?: number
   depth_min?: number
   depth_max?: number
+<<<<<<< HEAD
   start_time?: number
   end_time?: number
+=======
+>>>>>>> ff17395 (1)
   limit?: number
 }) {
   const searchParams = new URLSearchParams()
@@ -14,11 +17,17 @@ export async function fetchEarthquakes(params?: {
   if (params?.mag_max) searchParams.append('mag_max', String(params.mag_max))
   if (params?.depth_min) searchParams.append('depth_min', String(params.depth_min))
   if (params?.depth_max) searchParams.append('depth_max', String(params.depth_max))
+<<<<<<< HEAD
   if (params?.start_time) searchParams.append('start_time', String(params.start_time))
   if (params?.end_time) searchParams.append('end_time', String(params.end_time))
   if (params?.limit) searchParams.append('limit', String(params.limit))
 
   const res = await fetch(`${API_BASE}/earthquakes?${searchParams.toString()}`)
+=======
+  if (params?.limit) searchParams.append('limit', String(params.limit))
+
+  const res = await fetch(`${API_BASE}/earthquakes/latest?${searchParams.toString()}`)
+>>>>>>> ff17395 (1)
   if (!res.ok) throw new Error(`Failed to fetch earthquakes: ${res.statusText}`)
   return res.json()
 }
@@ -34,6 +43,7 @@ export async function fetchAnalytics(endpoint: string) {
   if (!res.ok) throw new Error(`Failed to fetch analytics: ${res.statusText}`)
   return res.json()
 }
+<<<<<<< HEAD
 
 export async function fetchClusters() {
   const res = await fetch(`${API_BASE}/clusters`)
@@ -152,3 +162,5 @@ export async function fetchTopCentralQuakes(limit: number = 10): Promise<{ id: s
   if (!res.ok) throw new Error(`Failed to fetch top central quakes: ${res.statusText}`)
   return res.json()
 }
+=======
+>>>>>>> ff17395 (1)
