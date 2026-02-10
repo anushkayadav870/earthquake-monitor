@@ -193,7 +193,7 @@ class MongoHandler:
             if depth_max is not None:
                 query["depth"]["$lte"] = float(depth_max)
 
-        # Bounding Box Filter (North/South = Lat, East/West = Lon)
+        # Bounding Box Filter (North/South = Lat, East/West == Lon)
         if north is not None or south is not None:
             query["latitude"] = {}
             if north is not None: query["latitude"]["$lte"] = float(north)

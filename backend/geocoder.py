@@ -12,7 +12,7 @@ class GeocodingService:
         # Reuse existing Redis if possible, or create new client for simple sync use here
         # (Using sync redis client for simplicity within this helper)
         self.redis_client = redis.from_url(REDIS_URL, decode_responses=True)
-        self.cache_ttl = 86400 # 24 hours
+        self.cache_ttl = 86400 # 24 hour
 
     def get_exact_address(self, lat, lon):
         cache_key = f"geo:{lat},{lon}"
