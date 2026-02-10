@@ -1,151 +1,104 @@
-# 🌍 Earthquake Monitor System
+# Real-Time Earthquake Monitoring System
 
-Welcome to the **Earthquake Monitor System**! This project is a real-time platform that tracks seismic activity worldwide, provides advanced analytics, and identifies relationships between earthquakes.
-
----
-
-## 🚀 Key Features
-
-The system is built across 5 phases of development:
-
-### 📡 Phase 1: Live Monitoring (MVP)
-*   **Real-Time Feed**: Fetches live data from the USGS (U.S. Geological Survey) every 30 seconds.
-*   **Intelligent Processing**: Automatically processes and stores new events.
-*   **Instant Alerts**: Notifies about high-magnitude earthquakes significantly impacting regions.
-
-### 🗺️ Phase 2: Visualization & Exploration
-*   **Heatmaps**: Identifies "hot zones" of seismic activity.
-*   **Advanced Filtering**: Filter earthquakes by depth, specific regions (California, Alaska, etc.), magnitude, and time.
-*   **Event Details**: View full metadata including nearby cities and detailed location addresses.
-
-### 📊 Phase 3: Analytics & Intelligence
-*   **Trend Analysis**: Track daily earthquake counts over time.
-*   **Magnitude Distribution**: See how many earthquakes fall into different intensity levels.
-*   **Correlation Analytics**: Analyze the relationship between earthquake depth and magnitude.
-
-### 🕸️ Phase 4: Graph & Relationship Insights
-*   **Aftershock Detection**: Automatically links smaller earthquakes to their "Main Shocks" based on time and distance.
-*   **Cascade Event Detection**: Identifies potential triggered events across different fault zones (e.g., an earthquake in one fault triggering another nearby).
-
-### ⚖️ Phase 5: Risk & Prediction Insights
-*   **Regional Risk Scoring**: Calculates a 0-100 risk score for regions based on historical and recent activity.
-*   **Unusual Activity Alerts**: Detects spikes in activity that differ significantly from historical averages.
+An advanced, distributed software platform designed for high-velocity seismic data ingestion, enrichment, and analytical visualization. This project demonstrates a **Polyglot Persistence** architecture, utilizing specialized database engines to solve distinct data challenges: real-time streaming, geospatial indexing, and graph-based relationship modeling.
 
 ---
 
-## 🛠️ Technical Architecture
+## 🏗️ System Architecture
 
-The system uses a highly scalable, event-driven architecture to ensure no seismic event is missed.
+The application is built on a microservice-oriented architecture, containerized with Docker for seamless orchestration.
 
-### System Architecture
-![Architecture Diagram](docs/architecture_diagram.png)
+### Polyglot Persistence Layer
+- **Redis (Speed)**: Manages the high-frequency event stream and provides a low-latency pub/sub channel for real-time dashboard updates.
+- **MongoDB (Geospatial Document Store)**: Acts as the primary historical archive. Leverages `2dsphere` indexing for efficient spatio-temporal queries and heatmap generation.
+- **Neo4j (Graph Logic)**: Maps complex seismic relationships, including aftershock sequences, cascade events, and spatial proximity to fault lines and urban centers.
 
-### Data Flow Diagram (Mermaid)
-```mermaid
-graph TD
-    subgraph External
-        USGS["USGS Earthquake API"]
-    end
-
-    subgraph "Ingestion Layer (Producer)"
-        P["Producer (Python)"]
-        Dedup["Deduplication (Redis SET)"]
-    end
-
-    subgraph "Messaging & Real-time (Redis)"
-        Stream["Event Stream (XADD)"]
-        PubSub["Alert Channel (Pub/Sub)"]
-        Buffer["Recent Buffer (ZSET)"]
-    end
-
-    subgraph "Processing Layer (Worker)"
-        W["Async Worker (Python)"]
-        Geo["Geocoder (Nominatim)"]
-    end
-
-    subgraph "Storage Layer"
-        Mongo[("MongoDB (Primary)")]
-        Neo[("Neo4j (Graph Rel)")]
-    end
-
-    subgraph "Access Layer (API)"
-        API["FastAPI (Backend)"]
-        Cache["Response Cache (Redis)"]
-    end
-
-    %% Data Flow
-    USGS -->|Fetch every 30s| P
-    P --> Dedup
-    P -->|New Events| Stream
-    P -->|Alerts| PubSub
-    P -->|Recent Playback| Buffer
-    
-    Stream -->|Consume| W
-    W -->|Reverse Geocoding| Geo
-    W -->|Save Metadata| Mongo
-    W -->|Build Relationships| Neo
-    
-    Mongo --> API
-    Neo --> API
-    API -->|JSON Response| User["User (CURL / Browser)"]
-    API -.->|Cache Results| Cache
-```
-
-### Components
-*   **Backend (Python/FastAPI)**: The brain of the system, handling all logic and APIs.
-*   **Real-Time Pipeline (Redis)**: Ensures data flows instantly from the internet to your screen.
-*   **Primary Storage (MongoDB)**: Stores all historical and detailed earthquake data.
-*   **Relationship Graph (Neo4j)**: Maps how earthquakes, regions, and fault lines are connected.
+### Data Flow
+1. **Ingestion**: The **Producer** fetches data from the USGS API every 30-60 seconds and publishes to a Redis Stream.
+2. **Processing**: The **Async Worker** consumes the stream, resolves coordinates into human-readable addresses via reverse geocoding, and performs parallel writes to MongoDB and Neo4j.
+3. **Delivery**: The **FastAPI Backend** serves as the gateway, providing RESTful endpoints and WebSocket connections for the **Next.js** frontend.
 
 ---
 
-## 🏃 How to Run the Project
+## 🌟 Key Features
+
+### 📡 Real-Time Intelligence
+- **Live Ingestion**: Continuous monitoring of global seismic activity with automated deduplication and regional threshold alerting.
+- **Reverse Geocoding**: Automated enrichment of raw coordinates into precise location addresses.
+
+### 📊 Advanced Analytics
+- **Spatio-Temporal Clustering**: Uses the DBSCAN algorithm to detect "seismic swarms" and group events by density.
+- **Risk Assessment**: Dynamic scoring system for geographical regions based on historical frequency and magnitude intensity.
+- **Trend Analysis**: Statistical distribution of magnitudes and daily occurrence trends.
+
+### 🕸️ Graph-Based Relationship Detection
+- **Seismic Chains**: Automated detection of Aftershocks and Foreshocks based on time/distance decay rules.
+- **Inter-Fault Triggering**: Identifies cascade events where activity on one fault zone correlates with stress transfer to another.
+
+---
+
+## 🛠️ Technology Stack
+
+| Layer | Technology |
+| :--- | :--- |
+| **Language** | Python 3.9+, TypeScript |
+| **Backend Framework** | FastAPI |
+| **Frontend Framework** | Next.js, Leaflet.js |
+| **Databases** | Redis, MongoDB, Neo4j |
+| **Orchestration** | Docker, Docker Compose |
+
+---
+
+## 🚀 Installation & Setup
 
 ### Prerequisites
-1.  **Docker Desktop**: Required to run the databases and system. [Download here](https://www.docker.com/products/docker-desktop/).
-2.  **VS Code**: Recommended for viewing the code.
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- Node.js (Optional, for manual frontend development)
+- Python 3.9+ (Optional, for manual backend development)
 
-### Quick Start
-1.  **Open Docker Desktop** and ensure it is running.
-2.  Open your terminal or command prompt in the project root folder.
-3.  Run the following command:
-    ```bash
-    docker-compose up --build
-    ```
-4.  Wait for the logs to stop scrolling. The first run might take 1-2 minutes to download everything.
-
----
-
-## 📍 Access Links
-*   **Main Web App**: [http://localhost:5173](http://localhost:5173) (Currently under development)
-*   **Interactive API Dashboard**: [http://localhost:8000/docs](http://localhost:8000/docs) (Best for testing!)
-*   **Neo4j Graph Browser**: [http://localhost:7474](http://localhost:7474) (Login: `neo4j` / Pass: `test1234`)
-
-### 📚 Detailed Documentation
-For more in-depth technical details, please refer to:
-- [Developer Manual](file:///Users/anushkayadav/Documents/GitHub/earthquake-monitor/MANUAL.md) - Deep dive into architecture and internals.
-- [Features & Filters Guide](file:///Users/anushkayadav/Documents/GitHub/earthquake-monitor/FEATURES.md) - Comprehensive list of every API capability.
-- [Data Flow Explanation](file:///Users/anushkayadav/Documents/GitHub/earthquake-monitor/data_flow_explanation.txt) - Masters-level data lifecycle breakdown.
+### Quick Start with Docker
+1. Clone the repository and navigate to the project root.
+2. Build and start the entire stack:
+   ```bash
+   docker-compose up --build
+   ```
+3. The system will automatically provision the databases, start the ingestion services, and launch the web interface.
 
 ---
 
-## 🧪 Testing the Features (For Professor)
+## 📍 Access Ports
 
-Use these links in your browser to see the "live" intelligence of the engine:
-
-1.  **Live Updates**: [Latest Earthquakes](http://localhost:8000/earthquakes/latest)
-2.  **Risk Scores**: [Top Risk Regions](http://localhost:8000/analytics/risk-scores)
-3.  **Aftershocks**: [Detected Sequences](http://localhost:8000/analytics/aftershocks)
-4.  **Heatmap Data**: [Seismic Density](http://localhost:8000/earthquakes/heatmap?start_time=0&end_time=9999999999999)
-5.  **Anomalies**: [Unusual Activity Report](http://localhost:8000/analytics/unusual-activity)
+| Service | URL |
+| :--- | :--- |
+| **API Documentation (Swagger)** | [http://localhost:8000/docs](http://localhost:8000/docs) |
+| **Neo4j Browser** | [http://localhost:7474](http://localhost:7474) (Login: `neo4j` / Pass: `test1234`) |
 
 ---
 
-## 🛠️ Troubleshooting
-*   **Connection Refused**: Ensure Docker Desktop is running.
-*   **Neo4j Login**: Use password `test1234`. If it asks to change, you can skip or use the same one.
-*   **System Reset**: To clear all data and start fresh:
-    ```bash
-    docker-compose down -v
-    docker-compose up --build
-    ```
+## 📐 technical Specifications
+
+### Data Flow Model
+The following diagram illustrates the lifecycle of a seismic event, from edge ingestion to persistent storage and real-time broadcast.
+
+![Data Flow Diagram](docs/data_flow.png)
+
+### Logical Entity-Relationship Model
+The schema is designed for high-performance retrieval of both spatial attributes and graph-based seismic relationships.
+
+![ER Diagram](docs/er_diagram.png)
+
+---
+
+## 📚 API Endpoints (Highlights)
+
+- `GET /earthquakes/latest`: Retrieves newest events from the Redis buffer.
+- `GET /earthquakes/heatmap`: Aggregated density data for map visualization.
+- `GET /analytics/risk-scores`: Calculated safety metrics per region.
+- `GET /analytics/aftershocks`: Graph-traversed seismic sequence pairs.
+
+---
+
+## 📜 Academic References
+- *Designing Data-Intensive Applications* (Kleppmann, 2017)
+- *Graph Databases in Practice* (Robinson et al., 2015)
+- *USGS Earthquake Hazards Program* (Data Source)

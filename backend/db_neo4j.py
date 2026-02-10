@@ -368,7 +368,7 @@ class Neo4jHandler:
         MATCH (e:Earthquake {id: $id})
         OPTIONAL MATCH (e)-[:OCCURRED_IN]->(r:Region)
         OPTIONAL MATCH (e)-[:OCCURRED_NEAR]->(c:City)
-        OPTIONAL MATCH (e)-[:ON_FAULT]->(f:FaultZone)
+        OPTIONAL MATCH (e)-[:ON_FAULTLINE]->(f:FaultZone)
         OPTIONAL MATCH (e)-[:AFFECTED_ZONE]->(ac:City)
         
         RETURN {
