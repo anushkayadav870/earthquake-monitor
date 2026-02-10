@@ -5,7 +5,7 @@ import time
 from motor.motor_asyncio import AsyncIOMotorClient
 from neo4j import GraphDatabase
 
-# Add parent directory to path to import local modules
+# Add parent directory to path to import local module
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from config import MONGO_URI, MONGO_DB_NAME, NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD
